@@ -4,7 +4,15 @@ LIBPATH=../src
 CC=cc
 LD=cc
 RM=rm -f
-CFLAGS=-O2 -DW65C02SCE_LINK=1 -DW65C02SCE_HOOK_REGS=1 -DW65C02SCE_HOOK_EOI=1
+
+ifdef DEBUG
+CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
+else
+CFLAGS=-O2
+endif
+
+CEFLAGS=-DW65C02SCE_LINK=1 -DW65C02SCE_HOOK_REGS=1
+
 LFLAGS=
 
 ifdef SEPARATE
@@ -15,17 +23,20 @@ else
 LIBFILES=$(LIBPATH)/w65c02s.o
 endif
 
-PROGS=busdump monitor
+PROGS=monitor busdump benchmark
 
 .PHONY: all clean
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I$(LIBPATH) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CEFLAGS) -I$(LIBPATH) -c -o $@ $<
+
+monitor: $(LIBFILES) monitor.o
+	$(LD) -o $@ $^ $(LFLAGS)
 
 busdump: $(LIBFILES) busdump.o
 	$(LD) -o $@ $^ $(LFLAGS)
 
-monitor: $(LIBFILES) monitor.o
+benchmark: $(LIBFILES) benchmark.o
 	$(LD) -o $@ $^ $(LFLAGS)
 
 all: $(PROGS) 

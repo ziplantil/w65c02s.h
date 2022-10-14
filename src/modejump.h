@@ -3,15 +3,17 @@
             by ziplantil 2022 -- under the CC0 license
             version: 2022-10-14
 
-            modejump.h - addressing mode jump table implementation
+            mjump.h - addressing mode jump table implementation
 *******************************************************************************/
 
-#ifndef W65C02SCE_MODEJUMP_H
-#define W65C02SCE_MODEJUMP_H
+#ifndef W65C02SCE_MJUMP_H
+#define W65C02SCE_MJUMP_H
 
 #define W65C02SCE
 #include "w65c02s.h"
 
+#define SKIP_REST             return 0
+#define SKIP_TO_NEXT(n)       do { ++cpu->cycl; goto cycle_##n; } while (0)
 #define BEGIN_INSTRUCTION     switch (cpu->cycl) { case 0: unreachable();
 #define CYCLE_END             if (!--cpu->left_cycles) return 1;
 #define CYCLE(n)                  CYCLE_END                                    \
@@ -19,10 +21,7 @@
 #define END_INSTRUCTION(n)        CYCLE_END                                    \
                               case n: break;                                   \
                               }                                                \
-                              return 0;
-
-#define SKIP_REST             return 0
-#define SKIP_TO_NEXT(n)       do { ++cpu->cycl; goto cycle_##n; } while (0)
+                              SKIP_REST;
 
 /* example instruction:
 
@@ -47,4 +46,4 @@ becomes
 
 */
 
-#endif /* W65C02SCE_MODEJUMP_H */
+#endif /* W65C02SCE_MJUMP_H */

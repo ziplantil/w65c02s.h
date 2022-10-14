@@ -20,7 +20,9 @@
 #define WRITE(a, v) (*cpu->mem_write)(a, v)
 #endif
 
-/* true if there is still more to run, false if not */
+INTERNAL void w65c02si_irq_latch(struct w65c02s_cpu *cpu);
+
+/* returns number of cycles run */
 INTERNAL bool w65c02si_run_mode(struct w65c02s_cpu *cpu);
 
 #endif /* W65C02SCE_MODE_H */

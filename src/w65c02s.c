@@ -21,7 +21,6 @@ void w65c02s_init(struct w65c02s_cpu *cpu
 #endif
                     ) {
     cpu->total_cycles = cpu->total_instructions = 0;
-    cpu->left_cycles = 0;
     cpu->reset = 1;
     cpu->cycl = 0;
 
@@ -94,7 +93,8 @@ void w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void)) {
 #endif
 
 #if W65C02SCE_HOOK_EOI
-void w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu, void (*instruction_hook)(void)) {
+void w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
+                                     void (*instruction_hook)(void)) {
     cpu->hook_eoi = instruction_hook;
 }
 #endif
