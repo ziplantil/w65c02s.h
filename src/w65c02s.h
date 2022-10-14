@@ -195,7 +195,7 @@ int w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu);
 void w65c02s_nmi(struct w65c02s_cpu *cpu);
 /* trigger CPU RESET */
 void w65c02s_reset(struct w65c02s_cpu *cpu);
-/* trigger CPU IRQ */
+/* trigger CPU IRQ (note: held on until cancelled) */
 void w65c02s_irq(struct w65c02s_cpu *cpu);
 /* cancel CPU IRQ */
 void w65c02s_irq_cancel(struct w65c02s_cpu *cpu);
