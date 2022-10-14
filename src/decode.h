@@ -70,10 +70,10 @@
 #define OPER_LDA                    10
 #define OPER_LDX                    11
 #define OPER_LDY                    12
-#define OPER_STZ                    13
-#define OPER_STA                    14
-#define OPER_STX                    15
-#define OPER_STY                    16
+#define OPER_STA                    13
+#define OPER_STX                    14
+#define OPER_STY                    15
+#define OPER_STZ                    16
 
 /* RMW instrs */
 /* NOP = 0 */

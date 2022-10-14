@@ -32,12 +32,12 @@ STATIC uint8_t update_flags(struct w65c02s_cpu *cpu, uint8_t q) {
     return q;
 }
 
-STATIC void interrupt_check(struct w65c02s_cpu *cpu) {
+STATIC void irq_latch(struct w65c02s_cpu *cpu) {
     cpu->do_nmi |= cpu->nmi;
     cpu->do_irq = cpu->irq && !GET_P(P_I);
 }
 
-STATIC void interrupt_reset(struct w65c02s_cpu *cpu) {
+STATIC void irq_reset(struct w65c02s_cpu *cpu) {
     if (cpu->reset) {
         cpu->reset = 0;
     } else if (cpu->in_nmi) {
@@ -81,8 +81,8 @@ STATIC void compute_branch(struct w65c02s_cpu *cpu) {
 }
 
 #define ADC_D_SPURIOUS(ea)                                                     \
-    if (!cpu->take) SKIP_REST; /* no penalty cycle => skip last read */       \
-    interrupt_check(cpu);                                                      \
+    if (!cpu->take) SKIP_REST; /* no penalty cycle => skip last read */        \
+    irq_latch(cpu);                                                            \
     cpu->p = cpu->p_adj;                                                       \
     READ(ea);
 
@@ -117,6 +117,7 @@ STATIC bool oper_imm(struct w65c02s_cpu *cpu, uint8_t v) {
 STATIC bool oper_addr(struct w65c02s_cpu *cpu, uint16_t a) {
     switch (cpu->oper) {
         case OPER_NOP:
+            READ(a);
             break;
 
         case OPER_AND:
@@ -136,10 +137,10 @@ STATIC bool oper_addr(struct w65c02s_cpu *cpu, uint16_t a) {
         case OPER_LDX: cpu->x = update_flags(cpu, READ(a));     break;
         case OPER_LDY: cpu->y = update_flags(cpu, READ(a));     break;
 
-        case OPER_STZ: WRITE(a, 0);                             break;
         case OPER_STA: WRITE(a, cpu->a);                        break;
         case OPER_STX: WRITE(a, cpu->x);                        break;
         case OPER_STY: WRITE(a, cpu->y);                        break;
+        case OPER_STZ: WRITE(a, 0);                             break;
         default: unreachable();
     }
     return 0;
@@ -148,7 +149,7 @@ STATIC bool oper_addr(struct w65c02s_cpu *cpu, uint16_t a) {
 STATIC bool mode_implied(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             switch (cpu->oper) {
                 case OPER_NOP:
                     break;
@@ -185,7 +186,7 @@ STATIC bool mode_implied(struct w65c02s_cpu *cpu) {
 STATIC bool mode_implied_x(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->x = w65c02si_oper_rmw(cpu, cpu->oper, cpu->x);
             READ(cpu->pc);
     END_INSTRUCTION(2)
@@ -194,7 +195,7 @@ STATIC bool mode_implied_x(struct w65c02s_cpu *cpu) {
 STATIC bool mode_implied_y(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->y = w65c02si_oper_rmw(cpu, cpu->oper, cpu->y);
             READ(cpu->pc);
     END_INSTRUCTION(2)
@@ -203,10 +204,10 @@ STATIC bool mode_implied_y(struct w65c02s_cpu *cpu) {
 STATIC bool mode_immediate(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_imm(cpu, READ(cpu->pc++)); /* penalty cycle? */
         CYCLE(2):
-            ADC_D_SPURIOUS(cpu->pc - 1);
+            ADC_D_SPURIOUS(cpu->pc);
     END_INSTRUCTION(3)
 }
 
@@ -215,7 +216,7 @@ STATIC bool mode_zeropage(struct w65c02s_cpu *cpu) {
         CYCLE(1):
             cpu->tr[0] = READ(cpu->pc++);
         CYCLE(2):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, cpu->tr[0]); /* penalty cycle? */
         CYCLE(3):
             ADC_D_SPURIOUS(cpu->tr[0]);
@@ -230,7 +231,7 @@ STATIC bool mode_zeropage_x(struct w65c02s_cpu *cpu) {
             cpu->tr[0] += cpu->x;
             READ(cpu->pc++);
         CYCLE(3):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, cpu->tr[0]); /* penalty cycle? */
         CYCLE(4):
             ADC_D_SPURIOUS(cpu->tr[0]);
@@ -245,7 +246,7 @@ STATIC bool mode_zeropage_y(struct w65c02s_cpu *cpu) {
             cpu->tr[0] += cpu->y;
             READ(cpu->pc++);
         CYCLE(3):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, cpu->tr[0]); /* penalty cycle? */
         CYCLE(4):
             ADC_D_SPURIOUS(cpu->tr[0]);
@@ -259,7 +260,7 @@ STATIC bool mode_absolute(struct w65c02s_cpu *cpu) {
         CYCLE(2):
             cpu->tr[1] = READ(cpu->pc++);
         CYCLE(3):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(4):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -277,10 +278,10 @@ STATIC bool mode_absolute_x(struct w65c02s_cpu *cpu) {
         CYCLE(3):
             /* if we did not cross the page boundary, skip this cycle */
             if (!cpu->tr[4] && !oper_is_store(cpu)) SKIP_TO_NEXT(4);
-            READ(cpu->pc - 1);
+            READ(!cpu->tr[4] ? GET_T16(0) : cpu->pc - 1);
             cpu->tr[1] += cpu->tr[4];
         CYCLE(4):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(5):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -298,10 +299,10 @@ STATIC bool mode_absolute_y(struct w65c02s_cpu *cpu) {
         CYCLE(3):
             /* if we did not cross the page boundary, skip this cycle */
             if (!cpu->tr[4] && !oper_is_store(cpu)) SKIP_TO_NEXT(4);
-            READ(cpu->pc - 1);
+            READ(!cpu->tr[4] ? GET_T16(0) : cpu->pc - 1);
             cpu->tr[1] += cpu->tr[4];
         CYCLE(4):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(5):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -317,7 +318,7 @@ STATIC bool mode_zeropage_indirect(struct w65c02s_cpu *cpu) {
         CYCLE(3):
             cpu->tr[1] = READ(cpu->tr[2]);
         CYCLE(4):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(5):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -336,7 +337,7 @@ STATIC bool mode_zeropage_indirect_x(struct w65c02s_cpu *cpu) {
         CYCLE(4):
             cpu->tr[1] = READ(cpu->tr[2]++);
         CYCLE(5):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(6):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -352,14 +353,14 @@ STATIC bool mode_zeropage_indirect_y(struct w65c02s_cpu *cpu) {
         CYCLE(3):
             cpu->tr[4] = OVERFLOW8(cpu->tr[0], cpu->y); /* page wrap cycle? */
             cpu->tr[0] += cpu->y;
-            cpu->tr[1] = READ(cpu->tr[2]++);
+            cpu->tr[1] = READ(cpu->tr[2]);
         CYCLE(4):
             /* if we did not cross the page boundary, skip this cycle */
             if (!cpu->tr[4] && !oper_is_store(cpu)) SKIP_TO_NEXT(5);
-            READ(cpu->pc - 1);
+            READ(cpu->tr[2]);
             cpu->tr[1] += cpu->tr[4];
         CYCLE(5):
-            interrupt_check(cpu);
+            irq_latch(cpu);
             cpu->take = oper_addr(cpu, GET_T16(0)); /* penalty cycle? */
         CYCLE(6):
             ADC_D_SPURIOUS(GET_T16(0));
@@ -370,8 +371,8 @@ STATIC bool mode_jump_absolute(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
             cpu->tr[0] = READ(cpu->pc++);
-            interrupt_check(cpu);
         CYCLE(2):
+            irq_latch(cpu);
             cpu->tr[1] = READ(cpu->pc);
             cpu->pc = GET_T16(0);
     END_INSTRUCTION(3)
@@ -389,8 +390,8 @@ STATIC bool mode_jump_indirect(struct w65c02s_cpu *cpu) {
             cpu->tr[2] = READ(GET_T16(0));
             /* increment with overflow */
             if (!++cpu->tr[0]) ++cpu->tr[1];
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             cpu->tr[3] = READ(GET_T16(0));
             cpu->pc = GET_T16(2);
     END_INSTRUCTION(6)
@@ -413,8 +414,8 @@ STATIC bool mode_jump_indirect_x(struct w65c02s_cpu *cpu) {
             cpu->tr[2] = READ(GET_T16(0));
             /* increment with overflow */
             if (!++cpu->tr[0]) ++cpu->tr[1];
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             cpu->tr[3] = READ(GET_T16(0));
             cpu->pc = GET_T16(2);
     END_INSTRUCTION(6)
@@ -429,8 +430,8 @@ STATIC bool mode_zeropage_bit(struct w65c02s_cpu *cpu) {
         CYCLE(3):
             cpu->tr[1] = w65c02si_oper_bitset(cpu->oper, cpu->tr[1]);
             READ(cpu->tr[0]);
-            interrupt_check(cpu);
         CYCLE(4):
+            irq_latch(cpu);
             WRITE(cpu->tr[0], cpu->tr[1]);
     END_INSTRUCTION(5)
 }
@@ -438,18 +439,18 @@ STATIC bool mode_zeropage_bit(struct w65c02s_cpu *cpu) {
 STATIC bool mode_relative(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
+            irq_latch(cpu);
             cpu->tr[0] = READ(cpu->pc++);
             compute_branch(cpu);
-            interrupt_check(cpu);
         CYCLE(2):
             /* skip the rest of the instruction if branch is not taken */
             if (!w65c02si_oper_branch(cpu->oper, cpu->p)) SKIP_REST;
             READ(GET_T16(0));
             cpu->pc = GET_T16(2);
-            interrupt_check(cpu);
         CYCLE(3):
             /* skip the rest of the instruction if no page boundary crossed */
             if (cpu->tr[1] == cpu->tr[3]) SKIP_REST;
+            irq_latch(cpu);
             READ(GET_T16(0));
     END_INSTRUCTION(4)
 }
@@ -459,23 +460,23 @@ STATIC bool mode_relative_bit(struct w65c02s_cpu *cpu) {
         CYCLE(1):
             cpu->tr[3] = READ(cpu->pc++);
         CYCLE(2):
-            cpu->tr[4] = READ(cpu->tr[3]);
+            READ(cpu->tr[3]);
         CYCLE(3):
+            cpu->tr[4] = READ(cpu->tr[3]);
+        CYCLE(4):
+            irq_latch(cpu);
+            cpu->take = w65c02si_oper_bitbranch(cpu->oper, cpu->tr[4]);
             cpu->tr[0] = READ(cpu->pc++);
             compute_branch(cpu);
-        CYCLE(4):
-            cpu->take = w65c02si_oper_bitbranch(cpu->oper, cpu->tr[4]);
-            READ(cpu->pc - 1);
-            interrupt_check(cpu);
         CYCLE(5):
             /* skip the rest of the instruction if branch is not taken */
             if (!cpu->take) SKIP_REST;
             READ(GET_T16(0));
             cpu->pc = GET_T16(2);
-            interrupt_check(cpu);
         CYCLE(6):
             /* skip the rest of the instruction if no page boundary crossed */
             if (cpu->tr[1] == cpu->tr[3]) SKIP_REST;
+            irq_latch(cpu);
             READ(GET_T16(0));
     END_INSTRUCTION(7)
 }
@@ -505,8 +506,8 @@ STATIC bool mode_rmw_zeropage(struct w65c02s_cpu *cpu) {
                     break;
                 default: unreachable();
             }
-            interrupt_check(cpu);
         CYCLE(4):
+            irq_latch(cpu);
             WRITE(cpu->tr[0], cpu->tr[1]);
     END_INSTRUCTION(5)
 }
@@ -523,8 +524,8 @@ STATIC bool mode_rmw_zeropage_x(struct w65c02s_cpu *cpu) {
         CYCLE(4):
             READ(cpu->tr[0]);
             cpu->tr[1] = w65c02si_oper_rmw(cpu, cpu->oper, cpu->tr[1]);
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             WRITE(cpu->tr[0], cpu->tr[1]);
     END_INSTRUCTION(6)
 }
@@ -556,8 +557,8 @@ STATIC bool mode_rmw_absolute(struct w65c02s_cpu *cpu) {
                     break;
                 default: unreachable();
             }
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             WRITE(GET_T16(0), cpu->tr[2]);
     END_INSTRUCTION(6)
 }
@@ -578,10 +579,10 @@ STATIC bool mode_rmw_absolute_x(struct w65c02s_cpu *cpu) {
         CYCLE(4):
             cpu->tr[2] = READ(GET_T16(0));
         CYCLE(5):
-            READ(GET_T16(0) + 1);
+            READ(GET_T16(0));
             cpu->tr[2] = w65c02si_oper_rmw(cpu, cpu->oper, cpu->tr[2]);
-            interrupt_check(cpu);
         CYCLE(6):
+            irq_latch(cpu);
             WRITE(GET_T16(0), cpu->tr[2]);
     END_INSTRUCTION(7)
 }
@@ -591,8 +592,8 @@ STATIC bool mode_stack_push(struct w65c02s_cpu *cpu) {
     BEGIN_INSTRUCTION
         CYCLE(1):
             READ(cpu->pc);
-            interrupt_check(cpu);
         CYCLE(2):
+            irq_latch(cpu);
             switch (cpu->oper) {
                 case OPER_PHP: tmp = cpu->p | P_A1 | P_B; break;
                 case OPER_PHA: tmp = cpu->a; break;
@@ -610,9 +611,9 @@ STATIC bool mode_stack_pull(struct w65c02s_cpu *cpu) {
         CYCLE(1):
             READ(cpu->pc);
         CYCLE(2):
-            READ(cpu->pc);
-            interrupt_check(cpu);
+            READ(STACK_ADDR(cpu->s));
         CYCLE(3):
+            irq_latch(cpu);
             tmp = stack_pull(cpu);
             switch (cpu->oper) {
                 case OPER_PHP: cpu->p = tmp | P_A1 | P_B; break;
@@ -635,8 +636,8 @@ STATIC bool mode_subroutine(struct w65c02s_cpu *cpu) {
             stack_push(cpu, GET_HI(cpu->pc));
         CYCLE(4):
             stack_push(cpu, GET_LO(cpu->pc));
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             cpu->tr[1] = READ(cpu->pc);
             cpu->pc = GET_T16(0);
     END_INSTRUCTION(6)
@@ -653,8 +654,8 @@ STATIC bool mode_return_sub(struct w65c02s_cpu *cpu) {
             SET_LO(cpu->pc, stack_pull(cpu));
         CYCLE(4):
             SET_HI(cpu->pc, stack_pull(cpu));
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             READ(cpu->pc++);
     END_INSTRUCTION(6)
 }
@@ -670,8 +671,8 @@ STATIC bool mode_stack_rti(struct w65c02s_cpu *cpu) {
             cpu->p = stack_pull(cpu) | P_A1 | P_B;
         CYCLE(4):
             SET_LO(cpu->pc, stack_pull(cpu));
-            interrupt_check(cpu);
         CYCLE(5):
+            irq_latch(cpu);
             SET_HI(cpu->pc, stack_pull(cpu));
     END_INSTRUCTION(6)
 }
@@ -696,7 +697,7 @@ static int mode_stack_brk(struct w65c02s_cpu *cpu) {
             if (brk) {
                 ++cpu->pc;
 #if W65C02SCE_HOOK_BRK
-                if (cpu->hook_brk && *(cpu->hook_brk)(tmp)) SKIP_REST;
+                if (cpu->hook_brk && (*cpu->hook_brk)(tmp)) SKIP_REST;
 #else
                 (void)tmp;
 #endif
@@ -720,11 +721,19 @@ static int mode_stack_brk(struct w65c02s_cpu *cpu) {
             SET_P(P_I, 1);
             SET_P(P_D, 0);
         CYCLE(5):
-            interrupt_reset(cpu);
+            if (cpu->nmi && cpu->in_irq) {
+                cpu->do_irq = cpu->in_irq = 0;
+                cpu->nmi = 0;
+                vec = VEC_NMI;
+            }
             SET_LO(cpu->pc, READ(vec));
         CYCLE(6):
+            irq_reset(cpu);
             SET_HI(cpu->pc, READ(vec + 1));
-    END_INSTRUCTION(7)
+        CYCLE(7):
+            if (!brk) --cpu->total_instructions;
+            SKIP_REST;
+    END_INSTRUCTION(8)
 }
 
 STATIC bool mode_nop_5c(struct w65c02s_cpu *cpu) {
@@ -756,7 +765,7 @@ STATIC bool mode_int_wait_stop(struct w65c02s_cpu *cpu) {
         CYCLE(1):
             READ(cpu->pc);
 #if W65C02SCE_HOOK_STP
-            if (stp && cpu->hook_stp && *(cpu->hook_stp)()) SKIP_REST;
+            if (stp && cpu->hook_stp && (*cpu->hook_stp)()) SKIP_REST;
 #endif
         CYCLE(2):
             READ(cpu->pc);

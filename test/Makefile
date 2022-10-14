@@ -4,7 +4,7 @@ LIBPATH=../src
 CC=cc
 LD=cc
 RM=rm -f
-CFLAGS=-O2 -DW65C02SCE_LINK=1 -DW65C02SCE_HOOK_REGS=1
+CFLAGS=-O2 -DW65C02SCE_LINK=1 -DW65C02SCE_HOOK_REGS=1 -DW65C02SCE_HOOK_EOI=1
 LFLAGS=
 
 ifdef SEPARATE
@@ -15,12 +15,15 @@ else
 LIBFILES=$(LIBPATH)/w65c02s.o
 endif
 
-PROGS=monitor
+PROGS=busdump monitor
 
 .PHONY: all clean
 
 %.o: %.c
 	$(CC) $(CFLAGS) -I$(LIBPATH) -c -o $@ $<
+
+busdump: $(LIBFILES) busdump.o
+	$(LD) -o $@ $^ $(LFLAGS)
 
 monitor: $(LIBFILES) monitor.o
 	$(LD) -o $@ $^ $(LFLAGS)

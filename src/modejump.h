@@ -9,6 +9,9 @@
 #ifndef W65C02SCE_MODEJUMP_H
 #define W65C02SCE_MODEJUMP_H
 
+#define W65C02SCE
+#include "w65c02s.h"
+
 #define BEGIN_INSTRUCTION     switch (cpu->cycl) { case 0: unreachable();
 #define CYCLE_END             if (!--cpu->left_cycles) return 1;
 #define CYCLE(n)                  CYCLE_END                                    \

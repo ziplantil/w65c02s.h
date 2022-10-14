@@ -1,3 +1,4 @@
 *.o
 .vscode/
+test/busdump
 test/monitor

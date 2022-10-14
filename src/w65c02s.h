@@ -148,8 +148,8 @@ struct w65c02s_cpu {
 
     /* addressing mode, operation, cycle of current instruction */
     unsigned int mode, oper, cycl;
-    /* running only one instruction? did we just run an instruction? */
-    unsigned int step, had_instruction;
+    /* running only one instruction */
+    unsigned int step;
 };
 
 #if W65C02SCE_LINK

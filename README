@@ -8,6 +8,7 @@ in theory it could be dynamically linked as well.
 * Supports all W65C02S instructions (6502, CMOS, Rockwell bit, WAI+STP)
 * High accuracy, down to memory read/write level
 * High performance, optimized well by compilers
+* Can stop mid-instruction when running cycle by cycle
 
 ==== Tests =====================================================================
 * Passes both the 6502 functional test and 65c02 extended opcodes

@@ -8,6 +8,9 @@
 
 #define W65C02SCE
 #include "w65c02s.h"
+
+#include <stddef.h>
+
 #include "execute.h"
 #include "oper.h"
 

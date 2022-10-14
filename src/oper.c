@@ -84,6 +84,7 @@ STATIC uint8_t oper_adc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
     SET_P_ADJ(P_Z, q == 0);
     SET_P_ADJ(P_C, fc);
     /* keep P_V as in binary addition */
+    SET_P(P_C, fc);
     return q;
 }
 
@@ -106,6 +107,7 @@ STATIC uint8_t oper_sbc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
     SET_P_ADJ(P_Z, q == 0);
     SET_P_ADJ(P_C, fc);
     /* keep P_V as in binary addition */
+    SET_P(P_C, fc);
     return q;
 }
 
@@ -126,19 +128,6 @@ INLINE uint8_t oper_sbc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     r = update_flags_nzc_adc(cpu, a + b + c);
     if (!GET_P(P_D)) return r;
     return oper_sbc_d(cpu, a, b, c);
-}
-
-INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
-                                   unsigned op, uint8_t v) {
-    switch (op) {
-        case OPER_ASL: return oper_asl(cpu, v);
-        case OPER_DEC: return oper_dec(cpu, v);
-        case OPER_INC: return oper_inc(cpu, v);
-        case OPER_LSR: return oper_lsr(cpu, v);
-        case OPER_ROL: return oper_rol(cpu, v);
-        case OPER_ROR: return oper_ror(cpu, v);
-    }
-    return v;
 }
 
 INTERNAL void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
@@ -163,6 +152,20 @@ INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
                                    uint8_t a, uint8_t b, bool set) {
     SET_P(P_Z, !(a & b));
     return set ? b | a : b & ~a;
+}
+
+INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
+                                   unsigned op, uint8_t v) {
+    switch (op) {
+        case OPER_ASL: return oper_asl(cpu, v);
+        case OPER_DEC: return oper_dec(cpu, v);
+        case OPER_INC: return oper_inc(cpu, v);
+        case OPER_LSR: return oper_lsr(cpu, v);
+        case OPER_ROL: return oper_rol(cpu, v);
+        case OPER_ROR: return oper_ror(cpu, v);
+        default: unreachable();
+    }
+    return v;
 }
 
 INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
