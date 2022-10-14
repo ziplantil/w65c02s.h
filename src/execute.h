@@ -9,6 +9,7 @@
 #ifndef W65C02SCE_EXECUTE_H
 #define W65C02SCE_EXECUTE_H
 
+#define W65C02SCE
 #include "w65c02s.h"
 
 INTERNAL void w65c02si_execute(struct w65c02s_cpu *cpu);

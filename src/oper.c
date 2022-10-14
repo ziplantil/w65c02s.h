@@ -59,43 +59,6 @@ INLINE uint8_t oper_ror(struct w65c02s_cpu *cpu, uint8_t v) {
     return update_flags_nzc(cpu, (v >> 1) | (GET_P(P_C) << 7), v & 1);
 }
 
-INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
-                                   unsigned op, uint8_t v) {
-    switch (op) {
-        case OPER_ASL: return oper_asl(cpu, v);
-        case OPER_DEC: return oper_dec(cpu, v);
-        case OPER_INC: return oper_inc(cpu, v);
-        case OPER_LSR: return oper_lsr(cpu, v);
-        case OPER_ROL: return oper_rol(cpu, v);
-        case OPER_ROR: return oper_ror(cpu, v);
-    }
-    return v;
-}
-
-INTERNAL void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
-                                uint8_t a, uint8_t b) {
-    update_flags_nzc_adc(cpu, a + (uint8_t)(~b) + 1);
-}
-
-INTERNAL void w65c02si_oper_bit(struct w65c02s_cpu *cpu,
-                                uint8_t a, uint8_t b) {
-    /* in BIT, N and V are bits 7 and 6 of the memory operand */
-    SET_P(P_N, (b >> 7) & 1);
-    SET_P(P_V, (b >> 6) & 1);
-    SET_P(P_Z, !(a & b));
-}
-
-INTERNAL void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
-                                    uint8_t a, uint8_t b) {
-    SET_P(P_Z, !(a & b));
-}
-
-INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
-                                   uint8_t a, uint8_t b, int set) {
-    SET_P(P_Z, !(a & b));
-    return set ? b | a : b & ~a;
-}
-
 INLINE unsigned oper_adc_v(uint8_t a, uint8_t b, uint8_t c) {
     unsigned c6 = ((a & 0x7F) + (b & 0x7F) + c) >> 7;
     unsigned c7 = (a + b + c) >> 8;
@@ -165,6 +128,43 @@ INLINE uint8_t oper_sbc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     return oper_sbc_d(cpu, a, b, c);
 }
 
+INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
+                                   unsigned op, uint8_t v) {
+    switch (op) {
+        case OPER_ASL: return oper_asl(cpu, v);
+        case OPER_DEC: return oper_dec(cpu, v);
+        case OPER_INC: return oper_inc(cpu, v);
+        case OPER_LSR: return oper_lsr(cpu, v);
+        case OPER_ROL: return oper_rol(cpu, v);
+        case OPER_ROR: return oper_ror(cpu, v);
+    }
+    return v;
+}
+
+INTERNAL void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
+                                uint8_t a, uint8_t b) {
+    update_flags_nzc_adc(cpu, a + (uint8_t)(~b) + 1);
+}
+
+INTERNAL void w65c02si_oper_bit(struct w65c02s_cpu *cpu,
+                                uint8_t a, uint8_t b) {
+    /* in BIT, N and V are bits 7 and 6 of the memory operand */
+    SET_P(P_N, (b >> 7) & 1);
+    SET_P(P_V, (b >> 6) & 1);
+    SET_P(P_Z, !(a & b));
+}
+
+INTERNAL void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
+                                    uint8_t a, uint8_t b) {
+    SET_P(P_Z, !(a & b));
+}
+
+INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
+                                   uint8_t a, uint8_t b, bool set) {
+    SET_P(P_Z, !(a & b));
+    return set ? b | a : b & ~a;
+}
+
 INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
                                    unsigned op, uint8_t a, uint8_t b) {
     switch (op) {
@@ -173,13 +173,15 @@ INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
         case OPER_ORA: return update_flags_nz(cpu, a | b);
         case OPER_ADC: return oper_adc(cpu, a, b);
         case OPER_SBC: return oper_sbc(cpu, a, b);
+        default: unreachable();
     }
     return update_flags_nz(cpu, b);
 }
 
-INTERNAL unsigned w65c02si_oper_branch(unsigned op, uint8_t p) {
+INTERNAL bool w65c02si_oper_branch(unsigned op, uint8_t p) {
     /* whether to take the branch? */
     switch (op) {
+        case OPER_BRA: return 1;
         case OPER_BPL: return !(p & P_N);
         case OPER_BMI: return  (p & P_N);
         case OPER_BVC: return !(p & P_V);
@@ -188,8 +190,9 @@ INTERNAL unsigned w65c02si_oper_branch(unsigned op, uint8_t p) {
         case OPER_BCS: return  (p & P_C);
         case OPER_BNE: return !(p & P_Z);
         case OPER_BEQ: return  (p & P_Z);
+        default: unreachable();
     }
-    return 1; /* BRA */
+    return 0;
 }
 
 INTERNAL uint8_t w65c02si_oper_bitset(unsigned oper, uint8_t v) {
@@ -197,7 +200,7 @@ INTERNAL uint8_t w65c02si_oper_bitset(unsigned oper, uint8_t v) {
     return (oper & 8) ? v | mask : v & ~mask;
 }
 
-INTERNAL unsigned w65c02si_oper_bitbranch(unsigned oper, uint8_t v) {
+INTERNAL bool w65c02si_oper_bitbranch(unsigned oper, uint8_t v) {
     uint8_t mask = 1 << (oper & 7);
     return (oper & 8) ? v & mask : !(v & mask);
 }

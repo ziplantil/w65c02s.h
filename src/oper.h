@@ -9,6 +9,7 @@
 #ifndef W65C02SCE_OPER_H
 #define W65C02SCE_OPER_H
 
+#define W65C02SCE
 #include "w65c02s.h"
 
 /* get flag of P */
@@ -60,9 +61,9 @@ INTERNAL void w65c02si_oper_bit(struct w65c02s_cpu *cpu,
 INTERNAL void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
                                     uint8_t a, uint8_t b);
 INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
-                                   uint8_t a, uint8_t b, int set);
-INTERNAL unsigned w65c02si_oper_branch(unsigned op, uint8_t p);
+                                   uint8_t a, uint8_t b, bool set);
+INTERNAL bool w65c02si_oper_branch(unsigned op, uint8_t p);
 INTERNAL uint8_t w65c02si_oper_bitset(unsigned oper, uint8_t v);
-INTERNAL unsigned w65c02si_oper_bitbranch(unsigned oper, uint8_t v);
+INTERNAL bool w65c02si_oper_bitbranch(unsigned oper, uint8_t v);
 
 #endif /* W65C02SCE_OPER_H */

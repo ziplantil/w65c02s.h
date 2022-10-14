@@ -9,16 +9,6 @@
 #ifndef W65C02SCE_MODEJUMP_H
 #define W65C02SCE_MODEJUMP_H
 
-#if __STDC_VERSION__ >= 202309L
-#include <stddef.h>
-#elif __GNUC__ >= 4
-#define unreachable() __builtin_unreachable()
-#elif defined(MSC_VER)
-#define unreachable() __assume(0)
-#else
-#define unreachable()
-#endif
-
 #define BEGIN_INSTRUCTION     switch (cpu->cycl) { case 0: unreachable();
 #define CYCLE_END             if (!--cpu->left_cycles) return 1;
 #define CYCLE(n)                  CYCLE_END                                    \

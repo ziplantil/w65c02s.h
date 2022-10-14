@@ -92,6 +92,22 @@ typedef unsigned short uint16_t;
 #define INTERNAL
 #define INTERNAL_INLINE
 #endif
+
+#if __STDC_VERSION__ >= 202309L
+#include <stddef.h>
+#elif __GNUC__ >= 4
+#define unreachable() __builtin_unreachable()
+#elif defined(MSC_VER)
+#define unreachable() __assume(0)
+#else
+#define unreachable()
+#endif
+#endif
+
+#if __STDC_VERSION__ >= 199901L || HAS_STDBOOL_H
+#include <stdbool.h>
+#else
+typedef int bool;
 #endif
 
 /* DO NOT ACCESS THESE FIELDS YOURSELF IN EXTERNAL CODE!
@@ -102,11 +118,13 @@ struct w65c02s_cpu {
 
     unsigned long left_cycles;
 
-    uint16_t pc;
     uint8_t a, x, y, s, p, p_adj; /* p_adj for decimal mode */
+    uint16_t pc;
 
-    /* temporary registers used to store state between cycles */
-    uint8_t tr[6];
+    /* temporary registers used to store state between cycles. */
+    uint8_t tr[5];
+    /* temporary true/false */
+    bool take;
 
 #if !W65C02SCE_LINK
     uint8_t (*mem_read)(uint16_t);

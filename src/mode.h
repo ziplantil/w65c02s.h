@@ -9,6 +9,7 @@
 #ifndef W65C02SCE_MODE_H
 #define W65C02SCE_MODE_H
 
+#define W65C02SCE
 #include "w65c02s.h"
 
 #if W65C02SCE_LINK
@@ -19,6 +20,7 @@
 #define WRITE(a, v) (*cpu->mem_write)(a, v)
 #endif
 
-INTERNAL int w65c02si_run_mode(struct w65c02s_cpu *cpu);
+/* true if there is still more to run, false if not */
+INTERNAL bool w65c02si_run_mode(struct w65c02s_cpu *cpu);
 
 #endif /* W65C02SCE_MODE_H */

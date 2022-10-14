@@ -38,8 +38,8 @@
 #define sbr MODE_RETURN_SUB
 #define wab MODE_RMW_ABSOLUTE
 #define wax MODE_RMW_ABSOLUTE_X
-#define wai MODE_INT_WAIT
-#define stp MODE_INT_STOP
+#define x5c MODE_NOP_5C
+#define wai MODE_INT_WAIT_STOP
 #define phv MODE_STACK_PUSH
 #define plv MODE_STACK_PULL
 #define brk MODE_STACK_BRK
@@ -52,7 +52,7 @@ int modes[256] = {
     /*20:2F*/ sbj,zix,imm,im1,zpg,zpg,wzp,zpb,plv,imm,imp,im1,abs,abs,wab,rlb,
     /*30:3F*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,imp,im1,abx,abx,wax,rlb,
     /*40:4F*/ rti,zix,imm,im1,zpg,zpg,wzp,zpb,phv,imm,imp,im1,abj,abs,wab,rlb,
-    /*50:5F*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,phv,im1,abs,abx,wax,rlb,
+    /*50:5F*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,phv,im1,x5c,abx,wax,rlb,
     /*60:6F*/ sbr,zix,imm,im1,zpg,zpg,wzp,zpb,plv,imm,imp,im1,ind,abs,wab,rlb,
     /*70:7F*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,plv,im1,idx,abx,wax,rlb,
     /*80:8F*/ rel,zix,imm,im1,zpg,zpg,zpg,zpb,imy,imm,imp,im1,abs,abs,abs,rlb,
@@ -60,18 +60,17 @@ int modes[256] = {
     /*A0:AF*/ imm,zix,imm,im1,zpg,zpg,zpg,zpb,imp,imm,imp,im1,abs,abs,abs,rlb,
     /*B0:BF*/ rel,ziy,zpi,im1,zpx,zpx,zpy,zpb,imp,aby,imp,im1,abx,abx,aby,rlb,
     /*C0:CF*/ imm,zix,imm,im1,zpg,zpg,wzp,zpb,imy,imm,imx,wai,abs,abs,wab,rlb,
-    /*D0:DF*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,phv,stp,abs,abx,wax,rlb,
+    /*D0:DF*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,phv,wai,abs,abx,wax,rlb,
     /*E0:EF*/ imm,zix,imm,im1,zpg,zpg,wzp,zpb,imx,imm,imp,im1,abs,abs,wab,rlb,
     /*F0:FF*/ rel,ziy,zpi,im1,zpx,zpx,wzx,zpb,imp,aby,plv,im1,abs,abx,wax,rlb,
 };
 
-#define BRA OPER_ONLY
-#define JSR OPER_ONLY
-#define RTS OPER_ONLY
-#define WAI OPER_ONLY
-#define STP OPER_ONLY
-#define BRK OPER_ONLY
-#define RTI OPER_ONLY
+#define NOP OPER_NOP
+#define BRA OPER_BRA
+#define JSR OPER_JSR
+#define RTS OPER_RTS
+#define BRK OPER_BRK
+#define RTI OPER_RTI
 
 #define LDA OPER_LDA
 #define LDX OPER_LDX
@@ -112,14 +111,13 @@ int modes[256] = {
 #define PHX OPER_PHX
 #define PHY OPER_PHY
 #define PHP OPER_PHP
-#define PLA OPER_PHA
-#define PLX OPER_PHX
-#define PLY OPER_PHY
-#define PLP OPER_PHP
+#define PLA OPER_PLA
+#define PLX OPER_PLX
+#define PLY OPER_PLY
+#define PLP OPER_PLP
 #define TSB OPER_TSB
 #define TRB OPER_TRB
 
-#define NOP OPER_NOP
 #define CLV OPER_CLV
 #define CLC OPER_CLC
 #define SEC OPER_SEC
@@ -133,7 +131,9 @@ int modes[256] = {
 #define TYA OPER_TYA
 #define TSX OPER_TSX
 #define TXS OPER_TXS
-#define JMP OPER_JMP
+
+#define WAI OPER_WAI
+#define STP OPER_STP
 
 int opers[256] = {
             /* 0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  */
