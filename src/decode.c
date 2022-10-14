@@ -6,10 +6,11 @@
             decode.c - instruction decoder
 *******************************************************************************/
 
+#define W65C02SCE
 #include "w65c02s.h"
-#include "decode.h"
+#if W65C02SCE_SEPARATE
 
-#if !W65C02SCE_SINGLEFILE
+#include "decode.h"
 
 #define imp MODE_IMPLIED
 #define imm MODE_IMMEDIATE
@@ -160,4 +161,4 @@ INTERNAL void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode) {
     cpu->cycl = 1;
 }
 
-#endif /* W65C02SCE_SINGLEFILE */
+#endif /* W65C02SCE_SEPARATE */

@@ -6,11 +6,12 @@
             oper.c - opcodes and internal operations
 *******************************************************************************/
 
+#define W65C02SCE
+#include "w65c02s.h"
+#if W65C02SCE_SEPARATE
+
 #include "decode.h"
 #include "oper.h"
-#include "w65c02s.h"
-
-#if !W65C02SCE_SINGLEFILE
 
 INLINE uint8_t update_flags_nz(struct w65c02s_cpu *cpu, uint8_t q) {
     /* N: bit 7 of result. Z: whether result is 0 */
@@ -95,7 +96,13 @@ INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
     return set ? b | a : b & ~a;
 }
 
-INLINE uint8_t oper_adc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
+INLINE unsigned oper_adc_v(uint8_t a, uint8_t b, uint8_t c) {
+    unsigned c6 = ((a & 0x7F) + (b & 0x7F) + c) >> 7;
+    unsigned c7 = (a + b + c) >> 8;
+    return c6 ^ c7;
+}
+
+STATIC uint8_t oper_adc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
                           unsigned c) {
     /* BCD addition one nibble/digit at a time */
     unsigned lo, hi, hc, fc, q;
@@ -117,7 +124,7 @@ INLINE uint8_t oper_adc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
     return q;
 }
 
-INLINE uint8_t oper_sbc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
+STATIC uint8_t oper_sbc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
                           unsigned c) {
     /* BCD subtraction one nibble/digit at a time */
     unsigned lo, hi, hc, fc, q;
@@ -139,19 +146,13 @@ INLINE uint8_t oper_sbc_d(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b,
     return q;
 }
 
-INLINE unsigned oper_adc_v(uint8_t a, uint8_t b, uint8_t c) {
-    unsigned c6 = ((a & 0x7F) + (b & 0x7F) + c) >> 7;
-    unsigned c7 = (a + b + c) >> 8;
-    return c6 ^ c7;
-}
-
 INLINE uint8_t oper_adc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     uint8_t r;
     unsigned c = GET_P(P_C);
     SET_P(P_V, oper_adc_v(a, b, c));
     r = update_flags_nzc_adc(cpu, a + b + c);
-    if (GET_P(P_D)) return oper_adc_d(cpu, a, b, c);
-    return r;
+    if (!GET_P(P_D)) return r;
+    return oper_adc_d(cpu, a, b, c);
 }
 
 INLINE uint8_t oper_sbc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
@@ -160,8 +161,8 @@ INLINE uint8_t oper_sbc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     b = ~b;
     SET_P(P_V, oper_adc_v(a, b, c));
     r = update_flags_nzc_adc(cpu, a + b + c);
-    if (GET_P(P_D)) return oper_sbc_d(cpu, a, b, c);
-    return r;
+    if (!GET_P(P_D)) return r;
+    return oper_sbc_d(cpu, a, b, c);
 }
 
 INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
@@ -201,4 +202,4 @@ INTERNAL unsigned w65c02si_oper_bitbranch(unsigned oper, uint8_t v) {
     return (oper & 8) ? v & mask : !(v & mask);
 }
 
-#endif /* W65C02SCE_SINGLEFILE */
+#endif /* W65C02SCE_SEPARATE */

@@ -6,13 +6,14 @@
             execute.c - instruction execution unit
 *******************************************************************************/
 
+#define W65C02SCE
+#include "w65c02s.h"
+#if W65C02SCE_SEPARATE
+
 #include "decode.h"
 #include "execute.h"
 #include "mode.h"
 #include "oper.h"
-#include "w65c02s.h"
-
-#if !W65C02SCE_SINGLEFILE
 
 INLINE void w65c02si_execute_i(struct w65c02s_cpu *cpu) {
     uint8_t ir;
@@ -73,7 +74,7 @@ instruction:
 #endif
             if (cpu->step) {
                 /* we finished one instruction, stop running */
-                cpu->step = cpu->had_instruction = cpu->cycl = 0;
+                cpu->had_instruction = cpu->cycl = 0;
                 return;
             }
         }
@@ -108,4 +109,4 @@ INTERNAL void w65c02si_execute(struct w65c02s_cpu *cpu) {
     cpu->total_cycles += cyclecount - cpu->left_cycles;
 }
 
-#endif /* W65C02SCE_SINGLEFILE*/
+#endif /* W65C02SCE_SEPARATE */

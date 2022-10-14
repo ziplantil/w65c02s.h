@@ -49,12 +49,6 @@
 /* returns 1 if a+b overflows, 0 if not (a, b are uint8_t) */
 #define OVERFLOW8(a, b) (((unsigned)(a) + (unsigned)(b)) >> 8)
 
-#if __STDC_VERSION__ >= 199901L
-#define INLINE static inline
-#else
-#define INLINE static
-#endif
-
 INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
                                    unsigned op, uint8_t v);
 INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,

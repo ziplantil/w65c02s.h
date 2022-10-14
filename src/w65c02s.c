@@ -6,6 +6,7 @@
             w65c02s.c - main emulator methods
 *******************************************************************************/
 
+#define W65C02SCE
 #include "w65c02s.h"
 #include "execute.h"
 #include "oper.h"
@@ -173,10 +174,11 @@ void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v) {
 }
 #endif
 
-#if W65C02SCE_SINGLEFILE
-#undef W65C02SCE_SINGLEFILE
+#if !W65C02SCE_SEPARATE
+#undef W65C02SCE_SEPARATE
+#define W65C02SCE_SEPARATE 1
 #include "execute.c"
-#include "mode.c"
 #include "oper.c"
+#include "mode.c"
 #include "decode.c"
 #endif

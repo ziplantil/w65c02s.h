@@ -47,11 +47,11 @@
 #define W65C02SCE_HAS_UINTN_T 0
 #endif
 
-/* 1: compiling w65c02s.c is enough, it includes the rest. */
-/* 0: compile source files separately. */
-/* useful to simulate link-time optimizations */
-#ifndef W65C02SCE_SINGLEFILE
-#define W65C02SCE_SINGLEFILE 0
+/* 1: compile source files separately. */
+/* 0: compiling w65c02s.c is enough, it includes the rest. */
+/*    useful to simulate link-time optimizations, which is why it is default */
+#ifndef W65C02SCE_SEPARATE
+#define W65C02SCE_SEPARATE 0
 #endif
 
 #if __STDC_VERSION__ >= 199901L || HAS_STDINT_H || HAS_STDINT
@@ -70,10 +70,28 @@ typedef unsigned short uint16_t;
 #endif
 #endif
 
+#ifdef W65C02SCE
+#if __STDC_VERSION__ >= 199901L
+#define STATIC static inline
+#if __GNUC__
+#define INLINE __attribute__((always_inline)) STATIC
+#elif defined(_MSC_VER)
+#define INLINE __forceinline STATIC
+#else
+#define INLINE STATIC
+#endif
+#else
+#define STATIC static
+#define INLINE STATIC
+#endif
+
 #if W65C02SCE_SINGLEFILE
-#define INTERNAL static
+#define INTERNAL STATIC
+#define INTERNAL_INLINE INLINE
 #else
 #define INTERNAL
+#define INTERNAL_INLINE
+#endif
 #endif
 
 /* DO NOT ACCESS THESE FIELDS YOURSELF IN EXTERNAL CODE!
@@ -95,10 +113,10 @@ struct w65c02s_cpu {
     void (*mem_write)(uint16_t, uint8_t);
 #endif
 #if W65C02SCE_HOOK_BRK
-    void (*hook_brk)(uint8_t);
+    int (*hook_brk)(uint8_t);
 #endif
 #if W65C02SCE_HOOK_STP
-    void (*hook_stp)(void);
+    int (*hook_stp)(void);
 #endif
 #if W65C02SCE_HOOK_EOI
     void (*hook_eoi)(void);
