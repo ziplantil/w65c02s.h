@@ -2,18 +2,27 @@
 LIBPATH=../src
 
 CC=cc
-LD=cc
+LD=$(CC)
 RM=rm -f
 
 ifdef DEBUG
 CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
 LFLAGS=
 else
-CFLAGS=-O3 -flto
+CFLAGS=-O1 -flto
 LFLAGS=-flto
 endif
 
 CEFLAGS=-DW65C02SCE_LINK=1
+
+ifdef PROFILE
+CFLAGS:=$(CFLAGS) -pg -g2
+LFLAGS:=$(LFLAGS) -pg
+endif
+
+ifdef HIGHPERF
+CEFLAGS:=$(CEFLAGS) -DW65C02SCE_ACCURATE=0
+endif
 
 ifdef SEPARATE
 LIBFILES=$(LIBPATH)/decode.o $(LIBPATH)/execute.o $(LIBPATH)/mode.o			   \

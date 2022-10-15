@@ -15,99 +15,147 @@
 #include "mode.h"
 #include "oper.h"
 
-INLINE void w65c02si_execute_i(struct w65c02s_cpu *cpu) {
-    /* if STP, skip everything... */
-    if (cpu->stp) {
-        if (cpu->rst) {
-            cpu->stp = 0;
-        } else {
-            /* nothing to do, return immediately */
-            cpu->left_cycles = 0;
-            return;
-        }
+static int handle_special_cpu_state(struct w65c02s_cpu *cpu) {
+    switch (CPU_STATE_EXTRACT(cpu)) {
+        case CPU_STATE_WAIT:
+            if (cpu->irq || cpu->nmi) {
+                w65c02si_irq_latch(cpu);
+                CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
+                return 1;
+            } else {
+                return 0;
+            }
+        case CPU_STATE_STOP:
+            return 0;
+    }
+    return 1;
+}
+
+INLINE void handle_reset(struct w65c02s_cpu *cpu) {
+    /* do RESET */
+    cpu->handled_interrupt = cpu->in_rst = 1;
+    cpu->in_nmi = cpu->in_irq = 0;
+    cpu->cpu_state = CPU_STATE_RUN;
+
+    SET_P(P_A1, 1);
+    SET_P(P_B, 1);
+    READ(cpu->pc); /* spurious */
+    w65c02si_decode(cpu, 0);
+}
+
+INLINE void handle_nmi(struct w65c02s_cpu *cpu) {
+    /* handle NMI: treat current instruction as BRK */
+    cpu->handled_interrupt = cpu->in_nmi = 1;
+    cpu->nmi = 0;
+    CPU_STATE_CLEAR_NMI(cpu);
+
+    READ(cpu->pc);
+    w65c02si_decode(cpu, 0);
+}
+
+INLINE void handle_irq(struct w65c02s_cpu *cpu) {
+    /* handle IRQ: treat current instruction as BRK */
+    cpu->handled_interrupt = cpu->in_irq = 1;
+    CPU_STATE_CLEAR_IRQ(cpu);
+
+    READ(cpu->pc);
+    w65c02si_decode(cpu, 0);
+}
+
+#if W65C02SCE_ACCURATE
+
+INTERNAL unsigned long w65c02si_execute_c(struct w65c02s_cpu *cpu,
+                                          unsigned long maximum_cycles) {
+    if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
+        if (!handle_special_cpu_state(cpu)) return maximum_cycles;
     }
 
-    /* if WAI, check for interrupt, or skip everything, */
-    if (cpu->wai) {
-        if (cpu->rst || cpu->irq || cpu->nmi) {
-            cpu->do_nmi |= cpu->nmi;
-            cpu->do_irq |= cpu->irq;
-            cpu->wai = 0;
-        } else {
-            /* nothing to do, return immediately */
-            cpu->left_cycles = 0;
-            return;
-        }
-    }
-
+    cpu->left_cycles = maximum_cycles;
     while (cpu->left_cycles) {
-        if (cpu->cycl) {
+        if (LIKELY(cpu->cycl)) {
             unsigned long cyclecount;
             /* continue running instruction */
 instruction:
             cyclecount = cpu->left_cycles;
             if (w65c02si_run_mode(cpu)) {
                 if (cpu->cycl) cpu->cycl += cyclecount - cpu->left_cycles;
-                return;
+                return maximum_cycles;
             }
 
             /* increment instruction tally */
-            if (cpu->handled_interrupt)
+            if (UNLIKELY(cpu->handled_interrupt))
                 cpu->handled_interrupt = 0;
             else
                 ++cpu->total_instructions;
 #if W65C02SCE_HOOK_EOI
             if (cpu->hook_eoi) (cpu->hook_eoi)();
 #endif
-            if (cpu->step) {
+            if (UNLIKELY(cpu->step)) {
                 /* we finished one instruction, stop running */
                 cpu->cycl = 0;
-                return;
+                return maximum_cycles - cpu->left_cycles;
             }
         }
 
-        if (UNLIKELY(cpu->rst)) {
-            /* do RESET */
-            cpu->in_rst = 1;
-            cpu->rst = 0;
-            cpu->do_nmi = cpu->do_irq = 0;
-            cpu->in_nmi = cpu->in_irq = 0;
-            cpu->handled_interrupt = 1;
+        if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
+            if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_RESET) {
+                handle_reset(cpu);
+                goto decoded;
+            } else if (!handle_special_cpu_state(cpu)) return 1;
 
-            SET_P(P_A1, 1);
-            SET_P(P_B, 1);
-            READ(cpu->pc); /* spurious */
-            w65c02si_decode(cpu, 0);
-        } else if (UNLIKELY(cpu->do_nmi)) {
-            /* handle NMI: treat current instruction as BRK */
-            cpu->in_nmi = 1;
-            cpu->nmi = cpu->do_nmi = 0;
-            cpu->handled_interrupt = 1;
-
-            READ(cpu->pc);
-            w65c02si_decode(cpu, 0);
-        } else if (UNLIKELY(cpu->do_irq)) {
-            /* handle IRQ: treat current instruction as BRK */
-            cpu->in_irq = 1;
-            cpu->do_irq = 0;
-            cpu->handled_interrupt = 1;
-
-            READ(cpu->pc);
-            w65c02si_decode(cpu, 0);
-        } else {
-            w65c02si_decode(cpu, READ(cpu->pc++));
-            w65c02si_prerun_mode(cpu);
+            if (CPU_STATE_HAS_NMI(cpu)) {
+                handle_nmi(cpu);
+                goto decoded;
+            } else if (CPU_STATE_HAS_IRQ(cpu)) {
+                handle_irq(cpu);
+                goto decoded;
+            }
         }
+        w65c02si_decode(cpu, READ(cpu->pc++));
+        w65c02si_prerun_mode(cpu);
 
+decoded:
         if (--cpu->left_cycles)
             goto instruction;
     }
+    return maximum_cycles;
 }
 
-INTERNAL void w65c02si_execute(struct w65c02s_cpu *cpu) {
-    unsigned long cyclecount = cpu->left_cycles;
-    w65c02si_execute_i(cpu);
-    cpu->total_cycles += cyclecount - cpu->left_cycles;
+#else /* W65C02SCE_ACCURATE */
+
+INTERNAL unsigned long w65c02si_execute_i(struct w65c02s_cpu *cpu) {
+    unsigned cycles;
+
+    if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
+        if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_RESET) {
+            handle_reset(cpu);
+            goto decoded;
+        } else if (!handle_special_cpu_state(cpu)) return 1;
+
+        if (CPU_STATE_HAS_NMI(cpu)) {
+            handle_nmi(cpu);
+            goto decoded;
+        } else if (CPU_STATE_HAS_IRQ(cpu)) {
+            handle_irq(cpu);
+            goto decoded;
+        }
+    }
+
+    w65c02si_decode(cpu, READ(cpu->pc++));
+    w65c02si_prerun_mode(cpu);
+decoded:
+    cycles = w65c02si_run_mode(cpu);
+
+    if (UNLIKELY(cpu->handled_interrupt))
+        cpu->handled_interrupt = 0;
+    else
+        ++cpu->total_instructions;
+#if W65C02SCE_HOOK_EOI
+    if (cpu->hook_eoi) (cpu->hook_eoi)();
+#endif
+    return cycles + 1;
 }
+
+#endif /* W65C02SCE_ACCURATE */
 
 #endif /* W65C02SCE_SEPARATE */

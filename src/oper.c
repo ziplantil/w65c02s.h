@@ -130,7 +130,7 @@ INLINE uint8_t oper_sbc(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     return oper_sbc_d(cpu, a, b, c);
 }
 
-INTERNAL void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
+INTERNAL_INLINE void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
                                 uint8_t a, uint8_t b) {
     update_flags_nzc_adc(cpu, a + (uint8_t)(~b) + 1);
 }
@@ -143,8 +143,8 @@ INTERNAL void w65c02si_oper_bit(struct w65c02s_cpu *cpu,
     SET_P(P_Z, !(a & b));
 }
 
-INTERNAL void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
-                                    uint8_t a, uint8_t b) {
+INTERNAL_INLINE void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
+                                           uint8_t a, uint8_t b) {
     SET_P(P_Z, !(a & b));
 }
 
@@ -168,8 +168,8 @@ INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
     return v;
 }
 
-INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
-                                   unsigned op, uint8_t a, uint8_t b) {
+INTERNAL_INLINE uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
+                                          unsigned op, uint8_t a, uint8_t b) {
     switch (op) {
         case OPER_AND: return update_flags_nz(cpu, a & b);
         case OPER_EOR: return update_flags_nz(cpu, a ^ b);

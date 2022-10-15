@@ -84,22 +84,23 @@ typedef unsigned short uint16_t;
 #error no uint16_t available
 #endif
 #endif
+
 #ifdef W65C02SCE
+
+#define STATIC static
 #if __STDC_VERSION__ >= 199901L
-#define STATIC static inline
 #if __GNUC__
-#define INLINE __attribute__((always_inline)) STATIC
+#define INLINE __attribute__((always_inline)) static inline
 #elif defined(_MSC_VER)
-#define INLINE __forceinline STATIC
+#define INLINE __forceinline static inline
 #else
-#define INLINE STATIC
+#define INLINE static inline
 #endif
 #else
-#define STATIC static
-#define INLINE STATIC
+#define INLINE static
 #endif
 
-#if W65C02SCE_SINGLEFILE
+#if !W65C02SCE_SEPARATE
 #define INTERNAL STATIC
 #define INTERNAL_INLINE INLINE
 #else
@@ -125,6 +126,23 @@ typedef unsigned short uint16_t;
 #define UNLIKELY(x) (x)
 #endif
 
+#define CPU_STATE_RUN 0
+#define CPU_STATE_RESET 1
+#define CPU_STATE_WAIT 2
+#define CPU_STATE_STOP 3
+#define CPU_STATE_IRQ 4
+#define CPU_STATE_NMI 8
+
+#define CPU_STATE_EXTRACT(cpu)      ((cpu)->cpu_state & 3)
+#define CPU_STATE_INSERT(cpu, s)    ((cpu)->cpu_state =                        \
+                                            ((cpu)->cpu_state & ~3) | s)
+#define CPU_STATE_HAS_NMI(cpu)      ((cpu)->cpu_state & CPU_STATE_NMI)
+#define CPU_STATE_HAS_IRQ(cpu)      ((cpu)->cpu_state & CPU_STATE_IRQ)
+#define CPU_STATE_ASSERT_NMI(cpu)   ((cpu)->cpu_state |= CPU_STATE_NMI)
+#define CPU_STATE_ASSERT_IRQ(cpu)   ((cpu)->cpu_state |= CPU_STATE_IRQ)
+#define CPU_STATE_CLEAR_NMI(cpu)    ((cpu)->cpu_state &= ~CPU_STATE_NMI)
+#define CPU_STATE_CLEAR_IRQ(cpu)    ((cpu)->cpu_state &= ~CPU_STATE_IRQ)
+
 #endif /* W65C02SCE */
 
 #if W65C02SCE_HAS_BOOL
@@ -138,10 +156,13 @@ typedef int bool;
 /* DO NOT ACCESS THESE FIELDS YOURSELF IN EXTERNAL CODE!
    all values here are internal! do not rely on them! use methods instead! */
 struct w65c02s_cpu {
+#if W65C02SCE_ACCURATE
     unsigned long left_cycles;
+#endif
+    unsigned cpu_state;
 
-    uint8_t a, x, y, s, p, p_adj; /* p_adj for decimal mode */
     uint16_t pc;
+    uint8_t a, x, y, s, p, p_adj; /* p_adj for decimal mode */
 
     /* temporary registers used to store state between cycles. */
     uint8_t tr[5];
@@ -151,17 +172,20 @@ struct w65c02s_cpu {
     unsigned long total_cycles;
     unsigned long total_instructions;
 
-    /* addressing mode, operation, cycle of current instruction */
-    unsigned int mode, oper, cycl;
+    /* addressing mode, operation*/
+    unsigned int mode, oper;
+#if W65C02SCE_ACCURATE
+    /* cycle of current instruction */
+    unsigned int cycl;
+#endif
     /* running only one instruction */
     bool step;
     /* whether we handled an interrupt */
     bool handled_interrupt;
 
-    bool do_nmi, do_irq;            /* pending NMI or IRQ? */
-    bool nmi, rst, irq;             /* NMI, RESET, IRQ interrupt flags */
+    /* NMI, RESET, IRQ interrupt flags */
+    unsigned nmi, irq;
     bool in_nmi, in_rst, in_irq;    /* entering NMI, resetting or IRQ? */
-    bool stp, wai;                  /* STP, flags */
 
     int (*hook_brk)(uint8_t);
     int (*hook_stp)(void);

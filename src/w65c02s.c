@@ -30,7 +30,9 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
                   void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t),
                   void *cpu_data) {
     cpu->total_cycles = cpu->total_instructions = 0;
+#if W65C02SCE_ACCURATE
     cpu->cycl = 0;
+#endif
 
 #if !W65C02SCE_LINK
     cpu->mem_read = mem_read ? mem_read : &w65c02s_openbus_read;
@@ -46,43 +48,63 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
 
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
                                  unsigned long cycles) {
-#if !W65C02SCE_ACCURATE
+#if W65C02SCE_ACCURATE
+    cpu->step = 0;
+    return w65c02si_execute_c(cpu, cycles);
+#else
+    unsigned long c = 0;
     /* we may overflow otherwise */
     if (cycles > ULONG_MAX - 8) cycles = ULONG_MAX - 8;
+    while (c < cycles)
+        c += w65c02si_execute_i(cpu);
+    return c;
 #endif
-    cpu->left_cycles = cycles;
-    cpu->step = 0;
-    if (cpu->left_cycles) w65c02si_execute(cpu);
-    return cycles;
 }
 
 unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
-                              unsigned long instructions,
-                              int finish_existing) {
-    unsigned long total_cycles = cpu->total_cycles;
+                                       unsigned long instructions,
+                                       int finish_existing) {
+    unsigned long total_cycles = 0;
+#if W65C02SCE_ACCURATE
     if (finish_existing && cpu->cycl) {
-        cpu->left_cycles = -1;
         cpu->step = 1;
-        w65c02si_execute(cpu);
+        total_cycles += w65c02si_execute_c(cpu, -1);
     }
+#endif
     while (instructions--) {
-        cpu->left_cycles = -1;
         cpu->step = 1;
-        w65c02si_execute(cpu);
+#if W65C02SCE_ACCURATE
+        total_cycles += w65c02si_execute_c(cpu, -1);
+#else
+        total_cycles += w65c02si_execute_i(cpu);
+#endif
     }
-    return cpu->total_cycles - total_cycles;
+    return total_cycles;
 }
 
 void w65c02s_nmi(struct w65c02s_cpu *cpu) {
-    cpu->nmi = 1;
+    cpu->nmi = CPU_STATE_NMI;
+    if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_WAIT) {
+        CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
+        CPU_STATE_ASSERT_NMI(cpu);
+    }
 }
 
 void w65c02s_reset(struct w65c02s_cpu *cpu) {
-    cpu->rst = 1;
+#if W65C02SCE_ACCURATE
+    /* acknowledge RST immediately on STP */
+    if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_STOP)
+        cpu->cycl = 0;
+#endif
+    CPU_STATE_INSERT(cpu, CPU_STATE_RESET);
 }
 
 void w65c02s_irq(struct w65c02s_cpu *cpu) {
-    cpu->irq = 1;
+    cpu->irq = CPU_STATE_IRQ;
+    if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_WAIT) {
+        CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
+        CPU_STATE_ASSERT_IRQ(cpu);
+    }
 }
 
 void w65c02s_irq_cancel(struct w65c02s_cpu *cpu) {
@@ -140,11 +162,11 @@ void *w65c02s_get_cpu_data(const struct w65c02s_cpu *cpu) {
 }
 
 bool w65c02s_is_cpu_waiting(const struct w65c02s_cpu *cpu) {
-    return cpu->wai;
+    return CPU_STATE_EXTRACT(cpu) == CPU_STATE_WAIT;
 }
 
 bool w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu) {
-    return cpu->stp;
+    return CPU_STATE_EXTRACT(cpu) == CPU_STATE_STOP;
 }
 
 void w65c02s_set_overflow(struct w65c02s_cpu *cpu) {

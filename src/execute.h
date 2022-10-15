@@ -12,6 +12,11 @@
 #define W65C02SCE
 #include "w65c02s.h"
 
-INTERNAL void w65c02si_execute(struct w65c02s_cpu *cpu);
+#if W65C02SCE_ACCURATE
+INTERNAL unsigned long w65c02si_execute_c(struct w65c02s_cpu *cpu,
+                                          unsigned long maximum_cycles);
+#else /* W65C02SCE_ACCURATE */
+INTERNAL unsigned long w65c02si_execute_i(struct w65c02s_cpu *cpu);
+#endif /* W65C02SCE_ACCURATE */
 
 #endif /* W65C02SCE_EXECUTE_H */

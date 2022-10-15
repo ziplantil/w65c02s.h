@@ -1234,8 +1234,13 @@ static void dumpregs(void) {
     printf("CC=%010lu  CI=%010lu  IC=%d    ",
             w65c02s_get_cycle_count(&cpu),
             w65c02s_get_instruction_count(&cpu),
-            cpu.cycl);
-    if (cpu.rst)
+#if W65C02S_ACCURATE
+            cpu.cycl
+#else
+            0
+#endif
+            );
+    if ((cpu.cpu_state & 3) == 1)
         printf("RESET    ");
     if (cpu.nmi)
         printf("NMI      ");
@@ -1408,7 +1413,7 @@ static void processline(void) {
             readaddress(&address_jump, &s);
             w65c02s_reg_set_pc(&cpu, address_jump);
             printf("PC=$%04X\n", w65c02s_reg_get_pc(&cpu));
-            if (cpu.rst || cpu.in_rst)
+            if ((cpu.cpu_state & 3) == 1 || cpu.in_rst)
                 puts("CPU is resetting and will overwrite this value");
             break;
         case 'L':

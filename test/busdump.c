@@ -23,8 +23,8 @@ unsigned instruction_cycles;
 void busdump(unsigned write, uint16_t addr, uint8_t data) {
     unsigned char buf[8];
     buf[0] = write | (cpu.in_rst ? 16 : 0)
-                   | (cpu.do_nmi ? 8 : 0)
-                   | (cpu.do_irq ? 4 : 0)
+                   | (cpu.cpu_state & 8) /* 8 = NMI, 0 = no NMI */
+                   | (cpu.cpu_state & 4) /* 4 = IRQ, 0 = no IRQ */
                    | (cpu.nmi ? 2 : 0)
                    | (cpu.irq ? 1 : 0);
     buf[1] = instruction_cycles;

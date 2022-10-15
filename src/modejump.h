@@ -12,14 +12,14 @@
 #define W65C02SCE
 #include "w65c02s.h"
 
-#if 1
+#if W65C02SCE_ACCURATE
 #define SKIP_REST             return 0
 #define SKIP_TO_NEXT(n)       do { ++cpu->cycl; goto cycle_##n; } while (0)
 #define BEGIN_INSTRUCTION     if (cpu->cycl == 1) goto cycle_1;                \
                               switch (cpu->cycl) {                             \
                               default: unreachable();
-#define CYCLE_END             if (!--cpu->left_cycles) return 1;
-#define CYCLE_END_LAST        if (!--cpu->left_cycles)                         \
+#define CYCLE_END             if (UNLIKELY(!--cpu->left_cycles)) return 1;
+#define CYCLE_END_LAST        if (UNLIKELY(!--cpu->left_cycles))               \
                                 { cpu->cycl = 0; return 1; }
                               
 #define CYCLE_LABEL_1(n)      cycle_##n: case n:
@@ -28,15 +28,13 @@
                               }                                                \
                               SKIP_REST;
 #else
-#define SKIP_REST             return 0
-#define SKIP_TO_NEXT(n)       do { ++cpu->cycl; goto cycle_##n; } while (0)
-#define BEGIN_INSTRUCTION
-#define CYCLE_END             if (!--cpu->left_cycles) return 1;
-#define CYCLE_END_LAST        if (!--cpu->left_cycles)                         \
-                                { cpu->cycl = 0; return 1; }
+#define SKIP_REST             return cyc
+#define SKIP_TO_NEXT(n)       goto cycle_##n;
+#define BEGIN_INSTRUCTION     unsigned cyc = 0;
+#define CYCLE_END             ++cyc;
 #define CYCLE_LABEL_1(n)      
 #define CYCLE_LABEL_X(n)      goto cycle_##n; cycle_##n:
-#define END_INSTRUCTION(n)        CYCLE_END_LAST                               \
+#define END_INSTRUCTION(n)        CYCLE_END                                    \
                               SKIP_REST;
 #endif
 

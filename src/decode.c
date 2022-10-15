@@ -45,7 +45,7 @@
 #define brk MODE_STACK_BRK
 #define rti MODE_STACK_RTI
 
-int modes[256] = {
+const unsigned char modes[256] = {
             /* 0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  */
     /*00:0F*/ brk,zix,imm,im1,wzp,zpg,wzp,zpb,phv,imm,imp,im1,wab,abs,wab,rlb,
     /*10:1F*/ rel,ziy,zpi,im1,wzp,zpx,wzx,zpb,imp,aby,imp,im1,wab,abx,wax,rlb,
@@ -135,7 +135,7 @@ int modes[256] = {
 #define WAI OPER_WAI
 #define STP OPER_STP
 
-int opers[256] = {
+const unsigned char opers[256] = {
             /* 0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  */
     /*00:0F*/ BRK,ORA,NOP,NOP,TSB,ORA,ASL,000,PHP,ORA,ASL,NOP,TSB,ORA,ASL,000,
     /*10:1F*/ BPL,ORA,ORA,NOP,TRB,ORA,ASL,001,CLC,ORA,INC,NOP,TRB,ORA,ASL,001,
@@ -155,10 +155,12 @@ int opers[256] = {
     /*F0:FF*/ BEQ,SBC,SBC,NOP,NOP,SBC,INC,017,SED,SBC,PLX,NOP,NOP,SBC,INC,017,
 };
 
-INTERNAL void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode) {
+INTERNAL_INLINE void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode) {
     cpu->mode = modes[opcode];
     cpu->oper = opers[opcode];
+#if W65C02SCE_ACCURATE
     cpu->cycl = 1;
+#endif
 }
 
 #endif /* W65C02SCE_SEPARATE */

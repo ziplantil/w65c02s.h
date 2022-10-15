@@ -50,20 +50,22 @@
 /* returns 1 if a+b overflows, 0 if not (a, b are uint8_t) */
 #define OVERFLOW8(a, b) (((unsigned)(a) + (unsigned)(b)) >> 8)
 
+#if W65C02SCE_SEPARATE
 INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
                                    unsigned op, uint8_t v);
-INTERNAL uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
-                                   unsigned op, uint8_t a, uint8_t b);
-INTERNAL void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
-                                uint8_t a, uint8_t b);
+INTERNAL_INLINE uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
+                                          unsigned op, uint8_t a, uint8_t b);
+INTERNAL_INLINE void w65c02si_oper_cmp(struct w65c02s_cpu *cpu,
+                                       uint8_t a, uint8_t b);
 INTERNAL void w65c02si_oper_bit(struct w65c02s_cpu *cpu,
                                 uint8_t a, uint8_t b);
-INTERNAL void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
-                                    uint8_t a, uint8_t b);
+INTERNAL_INLINE void w65c02si_oper_bit_imm(struct w65c02s_cpu *cpu,
+                                           uint8_t a, uint8_t b);
 INTERNAL uint8_t w65c02si_oper_tsb(struct w65c02s_cpu *cpu,
                                    uint8_t a, uint8_t b, bool set);
 INTERNAL bool w65c02si_oper_branch(unsigned op, uint8_t p);
 INTERNAL uint8_t w65c02si_oper_bitset(unsigned oper, uint8_t v);
 INTERNAL bool w65c02si_oper_bitbranch(unsigned oper, uint8_t v);
+#endif /* W65C02SCE_SEPARATE */
 
 #endif /* W65C02SCE_OPER_H */

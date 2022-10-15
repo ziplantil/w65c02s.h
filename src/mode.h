@@ -20,9 +20,10 @@
 #define WRITE(a, v) (*cpu->mem_write)(cpu, a, v)
 #endif
 
-INTERNAL void w65c02si_prerun_mode(struct w65c02s_cpu *cpu);
-
-/* true if there is still more to run, false if not */
-INTERNAL bool w65c02si_run_mode(struct w65c02s_cpu *cpu);
+#if W65C02SCE_SEPARATE
+INTERNAL_INLINE void w65c02si_irq_latch(struct w65c02s_cpu *cpu);
+INTERNAL_INLINE void w65c02si_prerun_mode(struct w65c02s_cpu *cpu);
+INTERNAL unsigned w65c02si_run_mode(struct w65c02s_cpu *cpu);
+#endif /* W65C02SCE_SEPARATE */
 
 #endif /* W65C02SCE_MODE_H */

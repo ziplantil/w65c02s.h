@@ -13,6 +13,9 @@
 
 #include "w65c02s.h"
 
+#if __STDC_VERSION__ >= 201112L
+_Alignas(128)
+#endif
 uint8_t ram[65536];
 struct w65c02s_cpu cpu;
 unsigned long cycles;

@@ -14,41 +14,42 @@
 
 /* all possible values for cpu->mode        (example opcode, ! = only) */
 #define MODE_IMPLIED                0       /*  CLD, DEC A */
-#define MODE_IMMEDIATE              1       /*  LDA # */
-#define MODE_RELATIVE               2       /*  BRA # */
-#define MODE_RELATIVE_BIT           3       /*  BBR0 # */
-#define MODE_ZEROPAGE               4       /*  LDA zp */
-#define MODE_ZEROPAGE_X             5       /*  LDA zp,x */
-#define MODE_ZEROPAGE_Y             6       /*  LDA zp,y */
-#define MODE_ZEROPAGE_BIT           7       /*  RMB0 zp */
-#define MODE_ABSOLUTE               8       /*  LDA abs */
-#define MODE_ABSOLUTE_X             9       /*  LDA abs,x */
-#define MODE_ABSOLUTE_Y             10      /*  LDA abs,y */
-#define MODE_ZEROPAGE_INDIRECT      11      /*  ORA (zp) */
+#define MODE_IMPLIED_X              1       /*  INX */
+#define MODE_IMPLIED_Y              2       /*  INY */
 
-#define MODE_ZEROPAGE_INDIRECT_X    12      /*  LDA (zp,x) */
-#define MODE_ZEROPAGE_INDIRECT_Y    13      /*  LDA (zp),y */
-#define MODE_ABSOLUTE_INDIRECT      14      /*! JMP (abs) */
-#define MODE_ABSOLUTE_INDIRECT_X    15      /*! JMP (abs,x) */
-#define MODE_ABSOLUTE_JUMP          16      /*! JMP abs */
+#define MODE_IMMEDIATE              3       /*  LDA # */
+#define MODE_RELATIVE               4       /*  BRA # */
+#define MODE_RELATIVE_BIT           5       /*  BBR0 # */
+#define MODE_ZEROPAGE               6       /*  LDA zp */
+#define MODE_ZEROPAGE_X             7       /*  LDA zp,x */
+#define MODE_ZEROPAGE_Y             8       /*  LDA zp,y */
+#define MODE_ZEROPAGE_BIT           9       /*  RMB0 zp */
+#define MODE_ABSOLUTE               10       /*  LDA abs */
+#define MODE_ABSOLUTE_X             11       /*  LDA abs,x */
+#define MODE_ABSOLUTE_Y             12      /*  LDA abs,y */
+#define MODE_ZEROPAGE_INDIRECT      13      /*  ORA (zp) */
 
-#define MODE_IMPLIED_1C             17      /*! NOP */
-#define MODE_IMPLIED_X              18      /*  INX */
-#define MODE_IMPLIED_Y              19      /*  INY */
+#define MODE_ZEROPAGE_INDIRECT_X    14      /*  LDA (zp,x) */
+#define MODE_ZEROPAGE_INDIRECT_Y    15      /*  LDA (zp),y */
+#define MODE_ABSOLUTE_INDIRECT      16      /*! JMP (abs) */
+#define MODE_ABSOLUTE_INDIRECT_X    17      /*! JMP (abs,x) */
+#define MODE_ABSOLUTE_JUMP          18      /*! JMP abs */
 
-#define MODE_RMW_ZEROPAGE           20      /*  LSR zp */
-#define MODE_RMW_ZEROPAGE_X         21      /*  LSR zp,x */
-#define MODE_SUBROUTINE             22      /*! JSR abs */
-#define MODE_RETURN_SUB             23      /*! RTS */
-#define MODE_RMW_ABSOLUTE           24      /*  LSR abs */
-#define MODE_RMW_ABSOLUTE_X         25      /*  LSR abs,x */
-#define MODE_NOP_5C                 26      /*! NOP ($5C) */
-#define MODE_INT_WAIT_STOP          27      /*  WAI, STP */
+#define MODE_RMW_ZEROPAGE           19      /*  LSR zp */
+#define MODE_RMW_ZEROPAGE_X         20      /*  LSR zp,x */
+#define MODE_SUBROUTINE             21      /*! JSR abs */
+#define MODE_RETURN_SUB             22      /*! RTS */
+#define MODE_RMW_ABSOLUTE           23      /*  LSR abs */
+#define MODE_RMW_ABSOLUTE_X         24      /*  LSR abs,x */
+#define MODE_NOP_5C                 25      /*! NOP ($5C) */
+#define MODE_INT_WAIT_STOP          26      /*  WAI, STP */
 
-#define MODE_STACK_PUSH             28      /*  PHA */
-#define MODE_STACK_PULL             29      /*  PLA */
-#define MODE_STACK_BRK              30      /*! BRK # */
-#define MODE_STACK_RTI              31      /*! RTI */
+#define MODE_STACK_PUSH             27      /*  PHA */
+#define MODE_STACK_PULL             28      /*  PLA */
+#define MODE_STACK_BRK              29      /*! BRK # */
+#define MODE_STACK_RTI              30      /*! RTI */
+
+#define MODE_IMPLIED_1C             31      /*! NOP */
 
 /* all possible values for cpu->oper. note that for
    MODE_ZEROPAGE_BIT and MODE_RELATIVE_BIT, the value is always 0-7 (bit)
@@ -132,6 +133,8 @@
 #define OPER_BRK                    0
 #define OPER_RTI                    0
 
-INTERNAL void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode);
+#if W65C02SCE_SEPARATE
+INTERNAL_INLINE void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode);
+#endif /* W65C02SCE_SEPARATE */
 
 #endif /* W65C02SCE_DECODE_H */
