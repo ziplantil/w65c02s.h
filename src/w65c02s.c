@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-14
+            version: 2022-10-15
 
             w65c02s.c - main emulator methods
 *******************************************************************************/
@@ -9,47 +9,57 @@
 #define W65C02SCE
 #include "w65c02s.h"
 
+#include <limits.h>
 #include <stddef.h>
 
 #include "execute.h"
 #include "oper.h"
 
-void w65c02s_init(struct w65c02s_cpu *cpu
 #if !W65C02SCE_LINK
-                  , uint8_t (*mem_read)(uint16_t)
-                  , void (*mem_write)(uint16_t, uint8_t)
+static uint8_t w65c02s_openbus_read(struct w65c02s_cpu *cpu,
+                                    uint16_t addr) {
+    return 0xFF;
+}
+
+static void w65c02s_openbus_write(struct w65c02s_cpu *cpu,
+                                  uint16_t addr, uint8_t value) { }
 #endif
-                    ) {
+
+void w65c02s_init(struct w65c02s_cpu *cpu,
+                  uint8_t (*mem_read)(struct w65c02s_cpu *, uint16_t),
+                  void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t),
+                  void *cpu_data) {
     cpu->total_cycles = cpu->total_instructions = 0;
-    cpu->reset = 1;
     cpu->cycl = 0;
 
 #if !W65C02SCE_LINK
-    cpu->mem_read = mem_read;
-    cpu->mem_write = mem_write;
+    cpu->mem_read = mem_read ? mem_read : &w65c02s_openbus_read;
+    cpu->mem_write = mem_write ? mem_write : &w65c02s_openbus_write;
 #endif
-#if W65C02SCE_HOOK_BRK
     cpu->hook_brk = NULL;
-#endif
-#if W65C02SCE_HOOK_STP
     cpu->hook_stp = NULL;
-#endif
-#if W65C02SCE_HOOK_EOI
     cpu->hook_eoi = NULL;
-#endif
+    cpu->cpu_data = cpu_data;
 
     w65c02s_reset(cpu);
 }
 
-void w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles) {
+unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
+                                 unsigned long cycles) {
+#if !W65C02SCE_ACCURATE
+    /* we may overflow otherwise */
+    if (cycles > ULONG_MAX - 8) cycles = ULONG_MAX - 8;
+#endif
     cpu->left_cycles = cycles;
     cpu->step = 0;
     if (cpu->left_cycles) w65c02si_execute(cpu);
+    return cycles;
 }
 
-void w65c02s_run_instructions(struct w65c02s_cpu *cpu,
+unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
                               unsigned long instructions,
                               int finish_existing) {
+    unsigned long total_cycles = cpu->total_cycles;
     if (finish_existing && cpu->cycl) {
         cpu->left_cycles = -1;
         cpu->step = 1;
@@ -60,6 +70,7 @@ void w65c02s_run_instructions(struct w65c02s_cpu *cpu,
         cpu->step = 1;
         w65c02si_execute(cpu);
     }
+    return cpu->total_cycles - total_cycles;
 }
 
 void w65c02s_nmi(struct w65c02s_cpu *cpu) {
@@ -67,7 +78,7 @@ void w65c02s_nmi(struct w65c02s_cpu *cpu) {
 }
 
 void w65c02s_reset(struct w65c02s_cpu *cpu) {
-    cpu->do_reset = 1;
+    cpu->rst = 1;
 }
 
 void w65c02s_irq(struct w65c02s_cpu *cpu) {
@@ -78,26 +89,35 @@ void w65c02s_irq_cancel(struct w65c02s_cpu *cpu) {
     cpu->irq = 0;
 }
 
-#if W65C02SCE_HOOK_BRK
 /* brk_hook: 0 = treat BRK as normal, <>0 = treat it as NOP */
-void w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t)) {
+int w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t)) {
+#if W65C02SCE_HOOK_BRK
     cpu->hook_brk = brk_hook;
-}
+    return 1;
+#else
+    return 0;
 #endif
+}
 
-#if W65C02SCE_HOOK_STP
 /* stp_hook: 0 = treat STP as normal, <>0 = treat it as NOP */
-void w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void)) {
+int w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void)) {
+#if W65C02SCE_HOOK_STP
     cpu->hook_stp = stp_hook;
-}
+    return 1;
+#else
+    return 0;
 #endif
+}
 
+int w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
+                                    void (*instruction_hook)(void)) {
 #if W65C02SCE_HOOK_EOI
-void w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
-                                     void (*instruction_hook)(void)) {
     cpu->hook_eoi = instruction_hook;
-}
+    return 1;
+#else
+    return 0;
 #endif
+}
 
 unsigned long w65c02s_get_cycle_count(const struct w65c02s_cpu *cpu) {
     return cpu->total_cycles;
@@ -115,12 +135,16 @@ void w65c02s_reset_instruction_count(struct w65c02s_cpu *cpu) {
     cpu->total_instructions = 0;
 }
 
-int w65c02s_is_cpu_waiting(const struct w65c02s_cpu *cpu) {
-    return !!cpu->wai;
+void *w65c02s_get_cpu_data(const struct w65c02s_cpu *cpu) {
+    return cpu->cpu_data;
 }
 
-int w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu) {
-    return !!cpu->stp;
+bool w65c02s_is_cpu_waiting(const struct w65c02s_cpu *cpu) {
+    return cpu->wai;
+}
+
+bool w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu) {
+    return cpu->stp;
 }
 
 void w65c02s_set_overflow(struct w65c02s_cpu *cpu) {

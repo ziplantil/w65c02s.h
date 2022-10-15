@@ -8,7 +8,7 @@ in theory it could be dynamically linked as well.
 * Supports all W65C02S instructions (6502, CMOS, Rockwell bit, WAI+STP)
 * High accuracy, down to memory read/write level
 * High performance, optimized well by compilers
-* Can stop mid-instruction when running cycle by cycle
+* (If enabled by flag) Can stop mid-instruction when running cycle by cycle
 
 ==== Tests =====================================================================
 * Passes both the 6502 functional test and 65c02 extended opcodes
@@ -18,7 +18,7 @@ in theory it could be dynamically linked as well.
 * Cycle/bus accuracy and interrupt timing may not yet be perfect.
 
 ==== Building ==================================================================
-* Statically linked.
+* Statically linked. See docs/defines.md for defines.
 * test/ contains testing programs (like monitor, build with make monitor).
 
 ==== License ===================================================================
@@ -33,98 +33,8 @@ work.  If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 
 ==== API =======================================================================
 
+```c
 #include "w65c02s.h"
+```
 
-if W65C02SCE_LINK is specified for statically link read/write:
-
-    /* Reads value from memory at address */
-    extern uint8_t w65c02s_read(uint16_t address);
-    /* Writes value into memory at address */
-    extern void w65c02s_write(uint16_t address, uint8_t value);
-
-    /* Initialize w65c02s_cpu */
-    void w65c02s_init(struct w65c02s_cpu *cpu);
-
-if not:
-
-    /* Initialize w65c02s_cpu */
-    void w65c02s_init(struct w65c02s_cpu *cpu,
-                  uint8_t (*mem_read)(uint16_t),
-                  void (*mem_write)(uint16_t, uint8_t));
-
-methods:
-
-    /* Run CPU for given number of cycles */
-    void w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles);
-
-    /* Run CPU for given number of instructions.
-      If finish_existing is specified, the current instruction,
-      if any is ongoing, is executed to the end and only then the number
-      of instructions specified. */
-    void w65c02s_run_instructions(struct w65c02s_cpu *cpu,
-                                  unsigned long instructions,
-                                  int finish_existing);
-
-    /* get total number of cycles executed */
-    unsigned long w65c02s_get_cycle_count(const struct w65c02s_cpu *cpu);
-
-    /* get total number of instructions executed */
-    unsigned long w65c02s_get_instruction_count(const struct w65c02s_cpu *cpu);
-
-    /* reset total cycle counter */
-    void w65c02s_reset_cycle_count(struct w65c02s_cpu *cpu);
-
-    /* reset total instruction counter */
-    void w65c02s_reset_instruction_count(struct w65c02s_cpu *cpu);
-
-    /* checks if CPU is in WAI (waiting for instruction) */
-    int w65c02s_is_cpu_waiting(const struct w65c02s_cpu *cpu);
-
-    /* checks if CPU is in STP (stopped execution) */
-    int w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu);
-
-    /* trigger CPU NMI */
-    void w65c02s_nmi(struct w65c02s_cpu *cpu);
-
-    /* trigger CPU RESET */
-    void w65c02s_reset(struct w65c02s_cpu *cpu);
-  
-    /* trigger CPU IRQ (note: held on until cancelled) */
-    void w65c02s_irq(struct w65c02s_cpu *cpu);
-
-    /* cancel CPU IRQ */
-    void w65c02s_irq_cancel(struct w65c02s_cpu *cpu);
-                                        
-    /* sets the overflow bit (pin S/O) */
-    void w65c02s_set_overflow(struct w65c02s_cpu *cpu);
-
-Only if compiled in with appropriate compiler flags:
-
-    /* hook BRK instruction. BRK immediate value given as parameter. */
-    /* brk_hook return value: 0 = treat BRK as normal, <>0 = treat it as NOP */
-    void w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t));
-
-    /* hook STP instruction. */
-    /* stp_hook return value: 0 = treat STP as normal, <>0 = treat it as NOP */
-    void w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void));
-    
-    /* hook end-of-instruction. */
-    void w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
-                                        void (*instruction_hook)(void));
-
-    /* register read */
-    uint8_t w65c02s_reg_get_a(const struct w65c02s_cpu *cpu);
-    uint8_t w65c02s_reg_get_x(const struct w65c02s_cpu *cpu);
-    uint8_t w65c02s_reg_get_y(const struct w65c02s_cpu *cpu);
-    uint8_t w65c02s_reg_get_p(const struct w65c02s_cpu *cpu);
-    uint8_t w65c02s_reg_get_s(const struct w65c02s_cpu *cpu);
-    uint16_t w65c02s_reg_get_pc(const struct w65c02s_cpu *cpu);
-
-    /* register write */
-    void w65c02s_reg_set_a(struct w65c02s_cpu *cpu, uint8_t v);
-    void w65c02s_reg_set_x(struct w65c02s_cpu *cpu, uint8_t v);
-    void w65c02s_reg_set_y(struct w65c02s_cpu *cpu, uint8_t v);
-    void w65c02s_reg_set_p(struct w65c02s_cpu *cpu, uint8_t v);
-    void w65c02s_reg_set_s(struct w65c02s_cpu *cpu, uint8_t v);
-    void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v);
-
+See docs/api.md.

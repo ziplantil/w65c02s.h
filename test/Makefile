@@ -7,13 +7,13 @@ RM=rm -f
 
 ifdef DEBUG
 CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
+LFLAGS=
 else
-CFLAGS=-O2
+CFLAGS=-O3 -flto
+LFLAGS=-flto
 endif
 
-CEFLAGS=-DW65C02SCE_LINK=1 -DW65C02SCE_HOOK_REGS=1
-
-LFLAGS=
+CEFLAGS=-DW65C02SCE_LINK=1
 
 ifdef SEPARATE
 LIBFILES=$(LIBPATH)/decode.o $(LIBPATH)/execute.o $(LIBPATH)/mode.o			   \

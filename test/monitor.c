@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-14
+            version: 2022-10-15
 
             monitor.c - test monitor
 *******************************************************************************/
@@ -1235,7 +1235,7 @@ static void dumpregs(void) {
             w65c02s_get_cycle_count(&cpu),
             w65c02s_get_instruction_count(&cpu),
             cpu.cycl);
-    if (cpu.reset)
+    if (cpu.rst)
         printf("RESET    ");
     if (cpu.nmi)
         printf("NMI      ");
@@ -1311,8 +1311,8 @@ static void runinstrs(unsigned long instrs) {
             printf("Reached breakpoint at $%04X\n", pc);
             break;
         }
-        w65c02s_run_instructions(&cpu, 1, 0);
         dumpstate();
+        w65c02s_run_instructions(&cpu, 1, 0);
         if (w65c02s_is_cpu_stopped(&cpu)) {
             puts("CPU hit STP");
             break;
@@ -1408,7 +1408,7 @@ static void processline(void) {
             readaddress(&address_jump, &s);
             w65c02s_reg_set_pc(&cpu, address_jump);
             printf("PC=$%04X\n", w65c02s_reg_get_pc(&cpu));
-            if (cpu.reset)
+            if (cpu.rst || cpu.in_rst)
                 puts("CPU is resetting and will overwrite this value");
             break;
         case 'L':
@@ -1476,7 +1476,7 @@ static void processline(void) {
 }
 
 int main(int argc, char *argv[]) {
-    w65c02s_init(&cpu);
+    w65c02s_init(&cpu, NULL, NULL, NULL);
     while (run && readline(">>> ")) processline();
     return 0;
 }
