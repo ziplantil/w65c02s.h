@@ -1,3 +1,7 @@
+```c
+#include "w65c02s.h"
+```
+
 ## w65c02s_init
 Initializes a new CPU instance.
 

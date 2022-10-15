@@ -8,7 +8,6 @@ def convert(file, text, signature):
     assert text.endswith("*/")
     text = text[:-2]
     text = re.sub(r"(?m)^\s*\*[ \t]{,2}", "", text)
-    print(text)
 
     text = re.sub(r"\n(?![\[\n])", " ", text)
     text = re.sub(r" +", " ", text)
@@ -57,6 +56,10 @@ with open("../src/w65c02s.h", "r") as source_file:
     source = source_file.read()
 
 with open("api.md", "w") as target:
+    print("""```c
+#include "w65c02s.h"
+```
+""", file = target)
     for comment_block, signature in re.findall(r"(?s)(/\*\* .+?\*/)([^;]*?;)", source):
         comment_block = re.sub(r"(W65C02SCE_[A-Z0-9_]+)", r"`\1`", comment_block)
         convert(target, comment_block, signature)
