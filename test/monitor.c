@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             monitor.c - test monitor
 *******************************************************************************/
@@ -12,6 +12,10 @@
 #include <string.h>
 
 #include "w65c02s.h"
+
+#if W65C02S_COARSE
+#error the monitor does not support compiling in coarse emulation mode
+#endif
 
 uint8_t ram[65536];
 uint8_t breakpoints[65536];
@@ -1234,12 +1238,7 @@ static void dumpregs(void) {
     printf("CC=%010lu  CI=%010lu  IC=%d    ",
             w65c02s_get_cycle_count(&cpu),
             w65c02s_get_instruction_count(&cpu),
-#if W65C02S_ACCURATE
-            cpu.cycl
-#else
-            0
-#endif
-            );
+            cpu.cycl);
     if ((cpu.cpu_state & 3) == 1)
         printf("RESET    ");
     if (cpu.nmi)

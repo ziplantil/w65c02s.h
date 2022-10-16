@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             decode.h - instruction decoder
 *******************************************************************************/
@@ -134,7 +134,7 @@
 #define OPER_RTI                    0
 
 #if W65C02SCE_SEPARATE
-INTERNAL_INLINE void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t opcode);
+INTERNAL_INLINE void w65c02si_decode(struct w65c02s_cpu *cpu, uint8_t ir);
 #endif /* W65C02SCE_SEPARATE */
 
 #endif /* W65C02SCE_DECODE_H */

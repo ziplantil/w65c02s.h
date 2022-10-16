@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             w65c02s.h - main emulator definitions (and external API)
 *******************************************************************************/
@@ -11,10 +11,16 @@
 
 /* defines */
 
-/* 1: accurate cycle counter, can stop and resume mid-instruction. */
-/* 0: always runs instructions as a whole */
-#ifndef W65C02SCE_ACCURATE
-#define W65C02SCE_ACCURATE 1
+/* 1: always runs instructions as a whole */
+/* 0: accurate cycle counter, can stop and resume mid-instruction. */
+#ifndef W65C02SCE_COARSE
+#define W65C02SCE_COARSE 0
+#endif
+
+/* 1: cycle counter is updated only at the end of an execution loop */
+/* 0: cycle counter is accurate even in callbacks */
+#ifndef W65C02SCE_COARSE_CYCLE_COUNTER
+#define W65C02SCE_COARSE_CYCLE_COUNTER 0
 #endif
 
 /* 1: define uint8_t w65c02s_read(uint16_t); 
@@ -132,6 +138,7 @@ typedef unsigned short uint16_t;
 #define CPU_STATE_STOP 3
 #define CPU_STATE_IRQ 4
 #define CPU_STATE_NMI 8
+#define CPU_STATE_STEP 16
 
 #define CPU_STATE_EXTRACT(cpu)      ((cpu)->cpu_state & 3)
 #define CPU_STATE_INSERT(cpu, s)    ((cpu)->cpu_state =                        \
@@ -156,7 +163,7 @@ typedef int bool;
 /* DO NOT ACCESS THESE FIELDS YOURSELF IN EXTERNAL CODE!
    all values here are internal! do not rely on them! use methods instead! */
 struct w65c02s_cpu {
-#if W65C02SCE_ACCURATE
+#if !W65C02SCE_COARSE
     unsigned long left_cycles;
 #endif
     unsigned cpu_state;
@@ -164,24 +171,23 @@ struct w65c02s_cpu {
     uint16_t pc;
     uint8_t a, x, y, s, p, p_adj; /* p_adj for decimal mode */
 
-    /* temporary registers used to store state between cycles. */
-    uint8_t tr[5];
     /* temporary true/false */
     bool take;
+#if __STDC_VERSION__ >= 201112L
+    _Alignas(uint16_t)
+#endif
+    /* temporary registers used to store state between cycles. */
+    uint8_t tr[5];
 
     unsigned long total_cycles;
     unsigned long total_instructions;
 
-    /* addressing mode, operation*/
+    /* addressing mode, operation */
     unsigned int mode, oper;
-#if W65C02SCE_ACCURATE
+#if !W65C02SCE_COARSE
     /* cycle of current instruction */
     unsigned int cycl;
 #endif
-    /* running only one instruction */
-    bool step;
-    /* whether we handled an interrupt */
-    bool handled_interrupt;
 
     /* NMI, RESET, IRQ interrupt flags */
     unsigned nmi, irq;
@@ -245,9 +251,13 @@ extern void w65c02s_write(uint16_t address, uint8_t value);
  *
  *  Runs the CPU for the given number of cycles.
  *
- *  If w65c02ce is compiled with W65C02SCE_ACCURATE, the CPU is always run
- *  exactly as many cycles as specified, but otherwise the actual number of
- *  cycles executed may not always match the specified value.
+ *  If w65c02ce is compiled with W65C02SCE_COARSE, the actual number of
+ *  cycles executed may not always match the given argument, but the return
+ *  value is always correct. Without W65C02SCE_COARSE the return value is
+ *  always the same as `cycles`.
+ *
+ *  This function is not reentrant. Calling it from a callback (for a memory
+ *  read, write, STP, etc.) will result in undefined behavior.
  *
  *  [Parameter: cpu] The CPU instance to run
  *  [Parameter: cycles] The number of cycles to run
@@ -267,6 +277,9 @@ unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles);
  *
  *  Entering an interrupt counts as an instruction here.
  *
+ *  This function is not reentrant. Calling it from a callback (for a memory
+ *  read, write, STP, etc.) will result in undefined behavior.
+ *
  *  [Parameter: cpu] The CPU instance to run
  *  [Parameter: instructions] The number of instructions to run
  *  [Parameter: finish_existing] Whether to finish the current instruction
@@ -280,6 +293,14 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
 /** w65c02s_get_cycle_count
  *
  *  Gets the total number of cycles executed by this CPU.
+ *
+ *  If the library has been compiled with W65C02SCE_COARSE_CYCLE_COUNTER,
+ *  this value might not be updated between calls to `w65c02s_run_cycles`
+ *  or `w65c02s_run_instructions`.
+ *
+ *  If it hasn't, the value returned by this function reflects how many
+ *  cycles have been run. For example, on the first reset cycle (spurious
+ *  read of the PC) of a new CPU instance, this will return 0.
  *
  *  [Parameter: cpu] The CPU instance to run
  *  [Return value] The number of cycles run in total

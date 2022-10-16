@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "w65c02s.h"
 
@@ -45,6 +46,8 @@ static size_t loadmemfromfile(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
+    double start, end;
+
     if (argc <= 3) {
         printf("%s <file_in> <vector> <cyclecount>\n", argv[0]);
         return EXIT_FAILURE;
@@ -61,7 +64,11 @@ int main(int argc, char *argv[]) {
     /* RESET cycles */
     w65c02s_run_cycles(&cpu, 7);
     cpu.pc = vector;
+    
+    start = (double)clock() / CLOCKS_PER_SEC;
     w65c02s_run_cycles(&cpu, cycles);
+    end = (double)clock() / CLOCKS_PER_SEC;
+    printf("%lf s\n", end - start);
 
     return EXIT_SUCCESS;
 }

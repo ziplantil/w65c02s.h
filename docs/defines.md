@@ -1,13 +1,34 @@
 # Compile-time flags (defines)
 
-## W65C02SCE_ACCURATE
-* **Default**: 1 (enabled)
+## W65C02SCE_COARSE
+* **Default**: 0 (disabled)
 
-If enabled, w65c02sce always runs exactly as many cycles as requested.
+If disabled, w65c02sce always runs exactly as many cycles as requested.
 
-If disabled, w65c02sce may run more or fewer cycles than requested, which
-will be reflected in the return value from `w65c02s_run_cycles`. Disabling
-`W65C02SCE_ACCURATE` may improve performance.
+If enabled, w65c02sce may run more or fewer cycles than requested, which
+will be reflected in the return value from `w65c02s_run_cycles`. To be
+specific, the emulator will only run instructions as atomic units and will
+never stop in the middle of an instruction. 
+
+Enabling coarse simulation effectively prevents cycle single-stepping and
+causes small deviations in the return value. For example, trying to run
+300,000 cycles with `w65c02s_run_cycles` may actually end up running
+300,002 cycles, but this is reflected in its return value.
+
+By compromising on emulation resolution, coarse mode considerably increases
+emulation performance (perhaps by as much as 30%, depending on the
+target system and used compiler optimizations).
+
+## W65C02S2CE_COARSE_CYCLE_COUNTER
+* **Default**: 0 (disabled)
+
+If set to 0, `w65c02s_get_cycle_count` will return the correct value of cycles
+even when the CPU is currently executing code (so that its value is valid
+when used from callbacks).
+
+If set to 1, the value returned by `w65c02s_get_cycle_count` will only be
+updated after a `w65c02s_run_cycles` or `w65c02s_run_instructions` call.
+This improves performance.
 
 ## W65C02SCE_LINK
 * **Default**: 0 (disabled)

@@ -57,9 +57,13 @@ Runs the CPU for the given number of cycles.
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles);
 ```
 
-If w65c02ce is compiled with `W65C02SCE_ACCURATE`, the CPU is always run
-exactly as many cycles as specified, but otherwise the actual number of cycles
-executed may not always match the specified value.
+If w65c02ce is compiled with `W65C02SCE_COARSE`, the actual number of cycles
+executed may not always match the given argument, but the return value is
+always correct. Without `W65C02SCE_COARSE` the return value is always the same
+as `cycles`.
+
+This function is not reentrant. Calling it from a callback (for a memory read,
+write, STP, etc.) will result in undefined behavior.
 
 * **Parameter** `cpu`: The CPU instance to run
 * **Parameter** `cycles`: The number of cycles to run
@@ -82,10 +86,14 @@ will be counted towards the limit.
 
 Entering an interrupt counts as an instruction here.
 
+This function is not reentrant. Calling it from a callback (for a memory read,
+write, STP, etc.) will result in undefined behavior.
+
 * **Parameter** `cpu`: The CPU instance to run
 * **Parameter** `instructions`: The number of instructions to run
 * **Parameter** `finish_existing`: Whether to finish the current instruction
-* **Return value**: The number of cycles that were actually run
+* **Return value**: The number of cycles that were actually run (mind the
+  overflow with large values of instructions!)
 
 ## w65c02s_get_cycle_count
 Gets the total number of cycles executed by this CPU.
@@ -93,6 +101,14 @@ Gets the total number of cycles executed by this CPU.
 ```c
 unsigned long w65c02s_get_cycle_count(const struct w65c02s_cpu *cpu);
 ```
+
+If the library has been compiled with `W65C02SCE_COARSE_CYCLE_COUNTER`, this
+value might not be updated between calls to `w65c02s_run_cycles` or
+`w65c02s_run_instructions`.
+
+If it hasn't, the value returned by this function reflects how many cycles have
+been run. For example, on the first reset cycle (spurious read of the PC) of a
+new CPU instance, this will return 0.
 
 * **Parameter** `cpu`: The CPU instance to run
 * **Return value**: The number of cycles run in total
@@ -229,7 +245,7 @@ This corresponds to the S/O pin on the physical CPU.
 Hooks the BRK instruction on the CPU.
 
 ```c
-void w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t));
+int w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t));
 ```
 
 The hook function should take a single uint8_t parameter, which corresponds to
@@ -239,17 +255,19 @@ normal.
 
 Passing NULL as the hook disables the hook.
 
-This method is only available if the code was compiled with the flag
+This function does nothing if the library was not compiled with
 `W65C02SCE_HOOK_BRK`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `brk_hook`: The new BRK hook
+* **Return value**: Whether the hook was set (0 only if the library was
+  compiled without `W65C02SCE_HOOK_BRK`)
 
 ## w65c02s_hook_stp
 Hooks the STP instruction on the CPU.
 
 ```c
-void w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void));
+int w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void));
 ```
 
 The hook function should take no parameters. If it returns a non-zero value,
@@ -257,18 +275,20 @@ the STP instruction is skipped, and otherwise it is treated as normal.
 
 Passing NULL as the hook disables the hook.
 
-This method is only available if the code was compiled with the flag
+This function does nothing if the library was not compiled with
 `W65C02SCE_HOOK_STP`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `stp_hook`: The new STP hook
+* **Return value**: Whether the hook was set (0 only if the library was
+  compiled without `W65C02SCE_HOOK_STP`)
 
 ## w65c02s_hook_end_of_instruction
 Hooks the end-of-instruction on the CPU.
 
 ```c
-void w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
-                                     void (*instruction_hook)(void));
+int w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
+                                    void (*instruction_hook)(void));
 ```
 
 The hook function should take no parameters. It is called when an instruction
@@ -276,11 +296,13 @@ finishes. The interrupt entering routine counts as an instruction here.
 
 Passing NULL as the hook disables the hook.
 
-This method is only available if the code was compiled with the flag
+This function does nothing if the library was not compiled with
 `W65C02SCE_HOOK_EOI`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `instruction_hook`: The new end-of-instruction hook
+* **Return value**: Whether the hook was set (0 only if the library was
+  compiled without `W65C02SCE_HOOK_EOI`)
 
 ## w65c02s_reg_get_a
 Returns the value of the A register on the CPU.
@@ -288,9 +310,6 @@ Returns the value of the A register on the CPU.
 ```c
 uint8_t w65c02s_reg_get_a(const struct w65c02s_cpu *cpu);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the A register

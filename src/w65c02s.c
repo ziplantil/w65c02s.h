@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             w65c02s.c - main emulator methods
 *******************************************************************************/
@@ -13,6 +13,7 @@
 #include <stddef.h>
 
 #include "execute.h"
+#include "mode.h"
 #include "oper.h"
 
 #if !W65C02SCE_LINK
@@ -30,7 +31,7 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
                   void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t),
                   void *cpu_data) {
     cpu->total_cycles = cpu->total_instructions = 0;
-#if W65C02SCE_ACCURATE
+#if !W65C02SCE_COARSE
     cpu->cycl = 0;
 #endif
 
@@ -48,37 +49,42 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
 
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
                                  unsigned long cycles) {
-#if W65C02SCE_ACCURATE
-    cpu->step = 0;
-    return w65c02si_execute_c(cpu, cycles);
-#else
     unsigned long c = 0;
+#if W65C02SCE_COARSE
     /* we may overflow otherwise */
     if (cycles > ULONG_MAX - 8) cycles = ULONG_MAX - 8;
     while (c < cycles)
         c += w65c02si_execute_i(cpu);
-    return c;
+#else
+    cpu->cpu_state &= ~CPU_STATE_STEP;
+    c = w65c02si_execute_c(cpu, cycles);
 #endif
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+    cpu->total_cycles += c;
+#endif
+    return c;
 }
 
 unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
                                        unsigned long instructions,
                                        int finish_existing) {
     unsigned long total_cycles = 0;
-#if W65C02SCE_ACCURATE
+    cpu->cpu_state |= CPU_STATE_STEP;
+#if !W65C02SCE_COARSE
     if (finish_existing && cpu->cycl) {
-        cpu->step = 1;
         total_cycles += w65c02si_execute_c(cpu, -1);
     }
 #endif
     while (instructions--) {
-        cpu->step = 1;
-#if W65C02SCE_ACCURATE
-        total_cycles += w65c02si_execute_c(cpu, -1);
-#else
+#if W65C02SCE_COARSE
         total_cycles += w65c02si_execute_i(cpu);
+#else
+        total_cycles += w65c02si_execute_c(cpu, -1);
 #endif
     }
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+    cpu->total_cycles += total_cycles;
+#endif
     return total_cycles;
 }
 
@@ -91,7 +97,7 @@ void w65c02s_nmi(struct w65c02s_cpu *cpu) {
 }
 
 void w65c02s_reset(struct w65c02s_cpu *cpu) {
-#if W65C02SCE_ACCURATE
+#if !W65C02SCE_COARSE
     /* acknowledge RST immediately on STP */
     if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_STOP)
         cpu->cycl = 0;
@@ -226,8 +232,8 @@ void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v) {
 #if !W65C02SCE_SEPARATE
 #undef W65C02SCE_SEPARATE
 #define W65C02SCE_SEPARATE 1
-#include "execute.c"
 #include "oper.c"
 #include "mode.c"
+#include "execute.c"
 #include "decode.c"
 #endif

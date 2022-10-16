@@ -16,6 +16,8 @@ in theory it could be dynamically linked as well.
 
 ==== Errata ====================================================================
 * Cycle/bus accuracy and interrupt timing may not yet be perfect.
+* All accesses to the same CPU must be done by the same thread.
+  Multithreaded access on the same CPU will result in undefined behavior.
 
 ==== Building ==================================================================
 * Statically linked. See docs/defines.md for defines.

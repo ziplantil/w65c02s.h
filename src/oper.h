@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-15
+            version: 2022-10-16
 
             oper.h - opcodes and internal operations
 *******************************************************************************/
@@ -44,7 +44,7 @@
 #define GET_LO(x) ((x) & 0xFF)
 #define SET_HI(x, v) ((x) = ((x) & 0x00FFU) | ((v) << 8))
 #define SET_LO(x, v) ((x) = ((x) & 0xFF00U) | (v))
-/* take tr[n] and tr[n + 1] as a 16-bit address */
+/* take tr[n] and tr[n + 1] as a 16-bit address. n is always even */
 #define GET_T16(n) (cpu->tr[n] | (cpu->tr[n + 1] << 8))
 
 /* returns 1 if a+b overflows, 0 if not (a, b are uint8_t) */
