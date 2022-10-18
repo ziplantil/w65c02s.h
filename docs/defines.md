@@ -16,7 +16,7 @@ causes small deviations in the return value. For example, trying to run
 300,002 cycles, but this is reflected in its return value.
 
 By compromising on emulation resolution, coarse mode considerably increases
-emulation performance (perhaps by as much as 30%, depending on the
+emulation performance (perhaps by as much as 30-40%, depending on the
 target system and used compiler optimizations).
 
 ## W65C02S2CE_COARSE_CYCLE_COUNTER
@@ -28,7 +28,7 @@ when used from callbacks).
 
 If set to 1, the value returned by `w65c02s_get_cycle_count` will only be
 updated after a `w65c02s_run_cycles` or `w65c02s_run_instructions` call.
-This improves performance.
+This improves performance (probably by about 5-10%).
 
 ## W65C02SCE_LINK
 * **Default**: 0 (disabled)

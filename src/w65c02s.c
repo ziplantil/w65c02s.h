@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             w65c02s.c - main emulator methods
 *******************************************************************************/
@@ -34,6 +34,8 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
 #if !W65C02SCE_COARSE
     cpu->cycl = 0;
 #endif
+    cpu->int_trig = 0;
+    cpu->in_nmi = cpu->in_rst = cpu->in_irq = 0;
 
 #if !W65C02SCE_LINK
     cpu->mem_read = mem_read ? mem_read : &w65c02s_openbus_read;
@@ -44,7 +46,7 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
     cpu->hook_eoi = NULL;
     cpu->cpu_data = cpu_data;
 
-    w65c02s_reset(cpu);
+    cpu->cpu_state = CPU_STATE_RESET;
 }
 
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
@@ -89,7 +91,7 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
 }
 
 void w65c02s_nmi(struct w65c02s_cpu *cpu) {
-    cpu->nmi = CPU_STATE_NMI;
+    cpu->int_trig |= CPU_STATE_NMI;
     if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_WAIT) {
         CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
         CPU_STATE_ASSERT_NMI(cpu);
@@ -97,24 +99,21 @@ void w65c02s_nmi(struct w65c02s_cpu *cpu) {
 }
 
 void w65c02s_reset(struct w65c02s_cpu *cpu) {
-#if !W65C02SCE_COARSE
-    /* acknowledge RST immediately on STP */
-    if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_STOP)
-        cpu->cycl = 0;
-#endif
     CPU_STATE_INSERT(cpu, CPU_STATE_RESET);
+    CPU_STATE_CLEAR_IRQ(cpu);
+    CPU_STATE_CLEAR_NMI(cpu);
 }
 
 void w65c02s_irq(struct w65c02s_cpu *cpu) {
-    cpu->irq = CPU_STATE_IRQ;
+    cpu->int_trig |= CPU_STATE_IRQ;
     if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_WAIT) {
         CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
-        CPU_STATE_ASSERT_IRQ(cpu);
+        cpu->cpu_state |= CPU_STATE_IRQ & cpu->int_mask;
     }
 }
 
 void w65c02s_irq_cancel(struct w65c02s_cpu *cpu) {
-    cpu->irq = 0;
+    cpu->int_trig &= ~CPU_STATE_IRQ;
 }
 
 /* brk_hook: 0 = treat BRK as normal, <>0 = treat it as NOP */
@@ -218,6 +217,7 @@ void w65c02s_reg_set_y(struct w65c02s_cpu *cpu, uint8_t v) {
 
 void w65c02s_reg_set_p(struct w65c02s_cpu *cpu, uint8_t v) {
     cpu->p = v | P_A1 | P_B;
+    w65c02si_irq_update_mask(cpu);
 }
 
 void w65c02s_reg_set_s(struct w65c02s_cpu *cpu, uint8_t v) {

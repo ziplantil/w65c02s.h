@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -25,8 +25,8 @@ void busdump(unsigned write, uint16_t addr, uint8_t data) {
     buf[0] = write | (cpu.in_rst ? 16 : 0)
                    | (cpu.cpu_state & 8) /* 8 = NMI, 0 = no NMI */
                    | (cpu.cpu_state & 4) /* 4 = IRQ, 0 = no IRQ */
-                   | (cpu.nmi ? 2 : 0)
-                   | (cpu.irq ? 1 : 0);
+                   | (cpu.int_trig & 8 ? 2 : 0)
+                   | (cpu.int_trig & 4 ? 1 : 0);
     buf[1] = instruction_cycles;
     buf[2] = cpu.pc & 0xFF;
     buf[3] = (cpu.pc >> 8) & 0xFF;

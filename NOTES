@@ -1,0 +1,14 @@
+Notes about w65c02s and its development:
+* The RESET/RST behaviour is not completely accurate, but at least the NMOS
+  6502 has unpredictable behavior during a reset anyway. It seems to do 2
+  spurious reads of PC before the third (first read of RESET), but in addition
+  to that, the current instruction gets run partially and often throws complete
+  nonsense onto the address bus. How the CMOS 65C02 behaves is uncertain.
+  I have chosen not to emulate the weird RESET behavior and instead it is
+  triggered instantly after the end of an instruction.
+* For some reason, -O2 and -O3 are consistently *slower* on gcc than -O1. This
+  seems to occur due to -ftree-tail-merge, which causes extra range checks to
+  be added to switch statements, despite __builtin_unreachable() being used.
+* The case of W65C02SCE_COARSE=0 could be optimized greatly by eliminating
+  the "cont = 0" branch entirely, but that does not seem possible in C89, even
+  with compiler extensions.

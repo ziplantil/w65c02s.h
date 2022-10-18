@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             oper.c - opcodes and internal operations
 *******************************************************************************/
@@ -163,8 +163,8 @@ INTERNAL uint8_t w65c02si_oper_rmw(struct w65c02s_cpu *cpu,
         case OPER_LSR: return oper_lsr(cpu, v);
         case OPER_ROL: return oper_rol(cpu, v);
         case OPER_ROR: return oper_ror(cpu, v);
-        default: unreachable();
     }
+    unreachable();
     return v;
 }
 
@@ -176,15 +176,14 @@ INTERNAL_INLINE uint8_t w65c02si_oper_alu(struct w65c02s_cpu *cpu,
         case OPER_ORA: return update_flags_nz(cpu, a | b);
         case OPER_ADC: return oper_adc(cpu, a, b);
         case OPER_SBC: return oper_sbc(cpu, a, b);
-        default: unreachable();
     }
+    unreachable();
     return update_flags_nz(cpu, b);
 }
 
 INTERNAL bool w65c02si_oper_branch(unsigned op, uint8_t p) {
     /* whether to take the branch? */
     switch (op) {
-        case OPER_BRA: return 1;
         case OPER_BPL: return !(p & P_N);
         case OPER_BMI: return  (p & P_N);
         case OPER_BVC: return !(p & P_V);
@@ -193,8 +192,9 @@ INTERNAL bool w65c02si_oper_branch(unsigned op, uint8_t p) {
         case OPER_BCS: return  (p & P_C);
         case OPER_BNE: return !(p & P_Z);
         case OPER_BEQ: return  (p & P_Z);
-        default: unreachable();
+        case OPER_BRA: return 1;
     }
+    unreachable();
     return 0;
 }
 

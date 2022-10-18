@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             decode.c - instruction decoder
 *******************************************************************************/
@@ -45,7 +45,10 @@
 #define brk MODE_STACK_BRK
 #define rti MODE_STACK_RTI
 
-static const unsigned modes[256] = {
+#if __STDC_VERSION__ >= 201112L
+_Alignas(256)
+#endif
+static const unsigned char modes[256] = {
             /* 0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  */
     /*00:0F*/ brk,zix,imm,im1,wzp,zpg,wzp,zpb,phv,imm,imp,im1,wab,abs,wab,rlb,
     /*10:1F*/ rel,ziy,zpi,im1,wzp,zpx,wzx,zpb,imp,aby,imp,im1,wab,abx,wax,rlb,
@@ -135,7 +138,10 @@ static const unsigned modes[256] = {
 #define WAI OPER_WAI
 #define STP OPER_STP
 
-static const unsigned opers[256] = {
+#if __STDC_VERSION__ >= 201112L
+_Alignas(256)
+#endif
+static const unsigned char opers[256] = {
             /* 0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  */
     /*00:0F*/ BRK,ORA,NOP,NOP,TSB,ORA,ASL,000,PHP,ORA,ASL,NOP,TSB,ORA,ASL,000,
     /*10:1F*/ BPL,ORA,ORA,NOP,TRB,ORA,ASL,001,CLC,ORA,INC,NOP,TRB,ORA,ASL,001,

@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -68,7 +68,11 @@ int main(int argc, char *argv[]) {
     start = (double)clock() / CLOCKS_PER_SEC;
     w65c02s_run_cycles(&cpu, cycles);
     end = (double)clock() / CLOCKS_PER_SEC;
+#if __STDC_VERSION__ >= 199901L
     printf("%lf s\n", end - start);
+#else
+    printf("%f s\n", end - start);
+#endif
 
     return EXIT_SUCCESS;
 }

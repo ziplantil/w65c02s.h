@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             decode.h - instruction decoder
 *******************************************************************************/
@@ -102,15 +102,15 @@
 #define OPER_TXS                    19 /*      impl */
 
 /* branch instrs. no NOPs use this mode, so 0 is ok */
-#define OPER_BRA                    0
-#define OPER_BPL                    1
-#define OPER_BMI                    2
-#define OPER_BVC                    3
-#define OPER_BVS                    4
-#define OPER_BCC                    5
-#define OPER_BCS                    6
-#define OPER_BNE                    7
-#define OPER_BEQ                    8
+#define OPER_BPL                    0
+#define OPER_BMI                    1
+#define OPER_BVC                    2
+#define OPER_BVS                    3
+#define OPER_BCC                    4
+#define OPER_BCS                    5
+#define OPER_BNE                    6
+#define OPER_BEQ                    7
+#define OPER_BRA                    8
 
 /* stack instrs. no NOPs use this mode, so 0 is ok */
 #define OPER_PHP                    0

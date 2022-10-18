@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             w65c02s.h - main emulator definitions (and external API)
 *******************************************************************************/
@@ -118,7 +118,7 @@ typedef unsigned short uint16_t;
 #include <stddef.h>
 #elif __GNUC__ >= 4
 #define unreachable() __builtin_unreachable()
-#elif defined(MSC_VER)
+#elif defined(_MSC_VER)
 #define unreachable() __assume(0)
 #else
 #define unreachable()
@@ -140,15 +140,16 @@ typedef unsigned short uint16_t;
 #define CPU_STATE_NMI 8
 #define CPU_STATE_STEP 16
 
-#define CPU_STATE_EXTRACT(cpu)      ((cpu)->cpu_state & 3)
-#define CPU_STATE_INSERT(cpu, s)    ((cpu)->cpu_state =                        \
-                                            ((cpu)->cpu_state & ~3) | s)
-#define CPU_STATE_HAS_NMI(cpu)      ((cpu)->cpu_state & CPU_STATE_NMI)
-#define CPU_STATE_HAS_IRQ(cpu)      ((cpu)->cpu_state & CPU_STATE_IRQ)
-#define CPU_STATE_ASSERT_NMI(cpu)   ((cpu)->cpu_state |= CPU_STATE_NMI)
-#define CPU_STATE_ASSERT_IRQ(cpu)   ((cpu)->cpu_state |= CPU_STATE_IRQ)
-#define CPU_STATE_CLEAR_NMI(cpu)    ((cpu)->cpu_state &= ~CPU_STATE_NMI)
-#define CPU_STATE_CLEAR_IRQ(cpu)    ((cpu)->cpu_state &= ~CPU_STATE_IRQ)
+#define CPU_STATE_EXTRACT(cpu)              ((cpu)->cpu_state & 3)
+#define CPU_STATE_EXTRACT_WITH_IRQ(cpu)     ((cpu)->cpu_state & 15)
+#define CPU_STATE_INSERT(cpu, s)            ((cpu)->cpu_state =                \
+                                                ((cpu)->cpu_state & ~3) | s)
+#define CPU_STATE_HAS_NMI(cpu)              ((cpu)->cpu_state & CPU_STATE_NMI)
+#define CPU_STATE_HAS_IRQ(cpu)              ((cpu)->cpu_state & CPU_STATE_IRQ)
+#define CPU_STATE_ASSERT_NMI(cpu)           ((cpu)->cpu_state |= CPU_STATE_NMI)
+#define CPU_STATE_ASSERT_IRQ(cpu)           ((cpu)->cpu_state |= CPU_STATE_IRQ)
+#define CPU_STATE_CLEAR_NMI(cpu)            ((cpu)->cpu_state &= ~CPU_STATE_NMI)
+#define CPU_STATE_CLEAR_IRQ(cpu)            ((cpu)->cpu_state &= ~CPU_STATE_IRQ)
 
 #endif /* W65C02SCE */
 
@@ -163,24 +164,33 @@ typedef int bool;
 /* DO NOT ACCESS THESE FIELDS YOURSELF IN EXTERNAL CODE!
    all values here are internal! do not rely on them! use methods instead! */
 struct w65c02s_cpu {
+#if !W65C02SCE_COARSE_CYCLE_COUNTER
+    unsigned long total_cycles;
+#endif
 #if !W65C02SCE_COARSE
+#if W65C02SCE_COARSE_CYCLE_COUNTER
     unsigned long left_cycles;
+#else
+    unsigned long target_cycles;
+#endif
 #endif
     unsigned cpu_state;
-
-    uint16_t pc;
-    uint8_t a, x, y, s, p, p_adj; /* p_adj for decimal mode */
+    /* currently active interrupts, interrupt mask */
+    unsigned int_trig, int_mask;
 
     /* temporary true/false */
     bool take;
+
 #if __STDC_VERSION__ >= 201112L
-    _Alignas(uint16_t)
+    _Alignas(2)
 #endif
     /* temporary registers used to store state between cycles. */
     uint8_t tr[5];
 
-    unsigned long total_cycles;
-    unsigned long total_instructions;
+    /* 6502 registers: PC, A, X, Y, S (stack pointer), P (flags). */
+    uint16_t pc;
+    uint8_t a, x, y, s, p, p_adj;
+    /* p_adj for decimal mode; it contains the "correct" flags. */
 
     /* addressing mode, operation */
     unsigned int mode, oper;
@@ -189,15 +199,22 @@ struct w65c02s_cpu {
     unsigned int cycl;
 #endif
 
-    /* NMI, RESET, IRQ interrupt flags */
-    unsigned nmi, irq;
-    bool in_nmi, in_rst, in_irq;    /* entering NMI, resetting or IRQ? */
+    unsigned long total_instructions;
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+    unsigned long total_cycles;
+#endif
 
+    /* entering NMI, resetting or IRQ? */
+    bool in_nmi, in_rst, in_irq;
+
+    /* BRK, STP, end of instruction hooks */
     int (*hook_brk)(uint8_t);
     int (*hook_stp)(void);
     void (*hook_eoi)(void);
+    /* data pointer from w65c02s_init */
     void *cpu_data;
 #if !W65C02SCE_LINK
+    /* memory read/write callbacks */
     uint8_t (*mem_read)(struct w65c02s_cpu *, uint16_t);
     void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t);
 #endif
@@ -378,7 +395,11 @@ void w65c02s_nmi(struct w65c02s_cpu *cpu);
  *
  *  Triggers a CPU reset.
  *
- *  The RESET will begin executing before the next instruction.
+ *  The RESET will begin executing before the next instruction. The RESET
+ *  does not behave exactly like in the original chip, and will not carry out
+ *  any extra cycles in between the end of the instruction and beginning of
+ *  the reset (like some chips do). There is also no requirement that RESET be
+ *  asserted before the last cycle, like with NMI or IRQ.
  *
  *  [Parameter: cpu] The CPU instance
  */

@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-16
+            version: 2022-10-18
 
             mode.c - addressing modes
 *******************************************************************************/
@@ -14,6 +14,14 @@
 #include "mode.h"
 #include "modejump.h"
 #include "oper.h"
+
+#if W65C02SCE_LINK
+#define READ(a) w65c02s_read(a)
+#define WRITE(a, v) w65c02s_write(a, v)
+#else
+#define READ(a) (*cpu->mem_read)(cpu, a)
+#define WRITE(a, v) (*cpu->mem_write)(cpu, a, v)
+#endif
 
 INLINE void stack_push(struct w65c02s_cpu *cpu, uint8_t v) {
     uint16_t s = STACK_ADDR(cpu->s--);
@@ -32,21 +40,17 @@ INLINE uint8_t update_flags(struct w65c02s_cpu *cpu, uint8_t q) {
     return q;
 }
 
-INLINE void irq_latch_slow(struct w65c02s_cpu *cpu) {
-    /* cpu->nmi = 0 | CPU_STATE_NMI */
-    cpu->cpu_state |= cpu->nmi;
-    /* cpu->irq = 0 | CPU_STATE_IRQ */
-    if (!GET_P(P_I)) cpu->cpu_state = (cpu->cpu_state & ~CPU_STATE_IRQ) | cpu->irq;
+INLINE void irq_update_mask(struct w65c02s_cpu *cpu) {
+    cpu->int_mask = GET_P(P_I) ? ~CPU_STATE_IRQ : ~0;
 }
 
 INLINE void irq_latch(struct w65c02s_cpu *cpu) {
-    /* cpu->nmi = 0 | CPU_STATE_NMI */
-    cpu->cpu_state |= cpu->nmi;
-    /* cpu->irq = 0 | CPU_STATE_IRQ */
-    /*           irq           0        IRQ  */
-    /*  P.I=0 -> ~P &  IRQ    =0       =1    */
-    /*  P.I=1 -> ~P & ~IRQ    =0       =0    */
-    cpu->cpu_state |= cpu->irq & ~cpu->p;
+    cpu->cpu_state |= cpu->int_trig & cpu->int_mask;
+}
+
+INLINE void irq_latch_slow(struct w65c02s_cpu *cpu) {
+    cpu->cpu_state &= ~CPU_STATE_IRQ;
+    irq_latch(cpu);
 }
 
 STATIC void irq_reset(struct w65c02s_cpu *cpu) {
@@ -165,16 +169,22 @@ STATIC bool oper_addr(struct w65c02s_cpu *cpu, uint16_t a) {
     return 0;
 }
 
-/* current CPU, current opcode, whether we are continuing an instruction */
-#define MODE_PARAMS struct w65c02s_cpu *cpu,                                   \
-                    unsigned cont
+#if !W65C02SCE_COARSE
+/* current CPU, whether we are continuing an instruction */
+#define PARAMS_MODE struct w65c02s_cpu *cpu, unsigned cont
+#define CALL_MODE(mode) mode_##mode(cpu, cont)
+#else
+#define PARAMS_MODE struct w65c02s_cpu *cpu
+#define CALL_MODE(mode) mode_##mode(cpu)
+#endif
 
 #define ADC_D_SPURIOUS(ea)                                                     \
     if (!cpu->take) SKIP_REST; /* no penalty cycle => skip last read */        \
     cpu->p = cpu->p_adj;                                                       \
     READ(ea);
+    /* no need to update mask - p_adj never changes I */
 
-static unsigned mode_implied(MODE_PARAMS) {
+static unsigned mode_implied(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         /* 0: irq_latch(cpu); (see execute.c) */
         CYCLE(1)
@@ -193,12 +203,12 @@ static unsigned mode_implied(MODE_PARAMS) {
                     cpu->a = w65c02si_oper_rmw(cpu, oper, cpu->a);
                     break;
 
-#define TRANSFER(src, dst) cpu->dst = update_flags(cpu, cpu->src);
+#define TRANSFER(src, dst) cpu->dst = update_flags(cpu, cpu->src)
                 case OPER_CLV: SET_P(P_V, 0);   break;
                 case OPER_CLC: SET_P(P_C, 0);   break;
                 case OPER_SEC: SET_P(P_C, 1);   break;
-                case OPER_CLI: SET_P(P_I, 0);   break;
-                case OPER_SEI: SET_P(P_I, 1);   break;
+                case OPER_CLI: SET_P(P_I, 0);   irq_update_mask(cpu); break;
+                case OPER_SEI: SET_P(P_I, 1);   irq_update_mask(cpu); break;
                 case OPER_CLD: SET_P(P_D, 0);   break;
                 case OPER_SED: SET_P(P_D, 1);   break;
                 case OPER_TAX: TRANSFER(a, x);  break;
@@ -214,7 +224,7 @@ static unsigned mode_implied(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_implied_x(MODE_PARAMS) {
+static unsigned mode_implied_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         /* 0: irq_latch(cpu); (see execute.c) */
         CYCLE(1)
@@ -223,7 +233,7 @@ static unsigned mode_implied_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_implied_y(MODE_PARAMS) {
+static unsigned mode_implied_y(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         /* 0: irq_latch(cpu); (see execute.c) */
         CYCLE(1)
@@ -232,7 +242,7 @@ static unsigned mode_implied_y(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_immediate(MODE_PARAMS) {
+static unsigned mode_immediate(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         /* 0: irq_latch(cpu); (see execute.c) */
         CYCLE(1)
@@ -242,7 +252,7 @@ static unsigned mode_immediate(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage(MODE_PARAMS) {
+static unsigned mode_zeropage(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -255,7 +265,7 @@ static unsigned mode_zeropage(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_x(MODE_PARAMS) {
+static unsigned mode_zeropage_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc);
@@ -271,7 +281,7 @@ static unsigned mode_zeropage_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_y(MODE_PARAMS) {
+static unsigned mode_zeropage_y(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc);
@@ -287,7 +297,7 @@ static unsigned mode_zeropage_y(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_absolute(MODE_PARAMS) {
+static unsigned mode_absolute(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -302,7 +312,7 @@ static unsigned mode_absolute(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_absolute_x(MODE_PARAMS) {
+static unsigned mode_absolute_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -326,7 +336,7 @@ static unsigned mode_absolute_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_absolute_y(MODE_PARAMS) {
+static unsigned mode_absolute_y(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -350,7 +360,7 @@ static unsigned mode_absolute_y(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_indirect(MODE_PARAMS) {
+static unsigned mode_zeropage_indirect(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[2] = READ(cpu->pc++);
@@ -367,7 +377,7 @@ static unsigned mode_zeropage_indirect(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_indirect_x(MODE_PARAMS) {
+static unsigned mode_zeropage_indirect_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[2] = READ(cpu->pc);
@@ -387,7 +397,7 @@ static unsigned mode_zeropage_indirect_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_indirect_y(MODE_PARAMS) {
+static unsigned mode_zeropage_indirect_y(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[2] = READ(cpu->pc++);
@@ -413,7 +423,7 @@ static unsigned mode_zeropage_indirect_y(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_jump_absolute(MODE_PARAMS) {
+static unsigned mode_jump_absolute(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -424,7 +434,7 @@ static unsigned mode_jump_absolute(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_jump_indirect(MODE_PARAMS) {
+static unsigned mode_jump_indirect(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -443,7 +453,7 @@ static unsigned mode_jump_indirect(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_jump_indirect_x(MODE_PARAMS) {
+static unsigned mode_jump_indirect_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -465,15 +475,14 @@ static unsigned mode_jump_indirect_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_zeropage_bit(MODE_PARAMS) {
+static unsigned mode_zeropage_bit(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
         CYCLE(2)
             cpu->tr[1] = READ(cpu->tr[0]);
         CYCLE(3)
-            cpu->tr[1] = w65c02si_oper_bitset(cpu->oper,
-                                              cpu->tr[1]);
+            cpu->tr[1] = w65c02si_oper_bitset(cpu->oper, cpu->tr[1]);
             READ(cpu->tr[0]);
             irq_latch(cpu);
         CYCLE(4)
@@ -481,7 +490,7 @@ static unsigned mode_zeropage_bit(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_relative(MODE_PARAMS) {
+static unsigned mode_relative(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         /* 0: irq_latch(cpu); (see execute.c) */
         CYCLE(1)
@@ -502,7 +511,7 @@ static unsigned mode_relative(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_relative_bit(MODE_PARAMS) {
+static unsigned mode_relative_bit(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[3] = READ(cpu->pc++);
@@ -511,8 +520,7 @@ static unsigned mode_relative_bit(MODE_PARAMS) {
         CYCLE(3)
             cpu->tr[4] = READ(cpu->tr[3]);
         CYCLE(4)
-            cpu->take = w65c02si_oper_bitbranch(cpu->oper,
-                                                cpu->tr[4]);
+            cpu->take = w65c02si_oper_bitbranch(cpu->oper, cpu->tr[4]);
             cpu->tr[0] = READ(cpu->pc++);
             compute_branch(cpu);
         CYCLE(5)
@@ -528,7 +536,7 @@ static unsigned mode_relative_bit(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_rmw_zeropage(MODE_PARAMS) {
+static unsigned mode_rmw_zeropage(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -562,7 +570,7 @@ static unsigned mode_rmw_zeropage(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_rmw_zeropage_x(MODE_PARAMS) {
+static unsigned mode_rmw_zeropage_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc);
@@ -580,7 +588,7 @@ static unsigned mode_rmw_zeropage_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_rmw_absolute(MODE_PARAMS) {
+static unsigned mode_rmw_absolute(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -616,7 +624,7 @@ static unsigned mode_rmw_absolute(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_rmw_absolute_x(MODE_PARAMS) {
+static unsigned mode_rmw_absolute_x(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             cpu->tr[0] = READ(cpu->pc++);
@@ -643,7 +651,7 @@ static unsigned mode_rmw_absolute_x(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_stack_push(MODE_PARAMS) {
+static unsigned mode_stack_push(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             READ(cpu->pc);
@@ -663,7 +671,7 @@ static unsigned mode_stack_push(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_stack_pull(MODE_PARAMS) {
+static unsigned mode_stack_pull(PARAMS_MODE) {
     BEGIN_INSTRUCTION
         CYCLE(1)
             READ(cpu->pc);
@@ -672,9 +680,12 @@ static unsigned mode_stack_pull(MODE_PARAMS) {
             irq_latch(cpu);
         CYCLE(3)
         {
-            uint8_t tmp= stack_pull(cpu);
+            uint8_t tmp = stack_pull(cpu);
             switch (cpu->oper) {
-                case OPER_PHP: cpu->p = tmp | P_A1 | P_B; break;
+                case OPER_PHP:
+                    cpu->p = tmp | P_A1 | P_B;
+                    irq_update_mask(cpu);
+                    break;
                 case OPER_PHA: cpu->a = update_flags(cpu, tmp); break;
                 case OPER_PHX: cpu->x = update_flags(cpu, tmp); break;
                 case OPER_PHY: cpu->y = update_flags(cpu, tmp); break;
@@ -684,7 +695,7 @@ static unsigned mode_stack_pull(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_subroutine(MODE_PARAMS) {
+static unsigned mode_subroutine(PARAMS_MODE) {
     /* op = JSR */
     BEGIN_INSTRUCTION
         CYCLE(1)
@@ -702,7 +713,7 @@ static unsigned mode_subroutine(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_return_sub(MODE_PARAMS) {
+static unsigned mode_return_sub(PARAMS_MODE) {
     /* op = RTS */
     BEGIN_INSTRUCTION
         CYCLE(1)
@@ -719,7 +730,7 @@ static unsigned mode_return_sub(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_stack_rti(MODE_PARAMS) {
+static unsigned mode_stack_rti(PARAMS_MODE) {
     /* op = RTI */
     BEGIN_INSTRUCTION
         CYCLE(1)
@@ -728,6 +739,7 @@ static unsigned mode_stack_rti(MODE_PARAMS) {
             READ(STACK_ADDR(cpu->s));
         CYCLE(3)
             cpu->p = stack_pull(cpu) | P_A1 | P_B;
+            irq_update_mask(cpu);
         CYCLE(4)
             SET_LO(cpu->pc, stack_pull(cpu));
             irq_latch(cpu);
@@ -736,7 +748,7 @@ static unsigned mode_stack_rti(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static int mode_stack_brk(MODE_PARAMS) {
+static int mode_stack_brk(PARAMS_MODE) {
     /* op = BRK (possibly via NMI, IRQ or RESET) */
     BEGIN_INSTRUCTION
         CYCLE(1)
@@ -771,11 +783,12 @@ static int mode_stack_brk(MODE_PARAMS) {
             }
             SET_P(P_I, 1);
             SET_P(P_D, 0);
+            irq_update_mask(cpu);
         CYCLE(5)
             /* NMI replaces IRQ if one is triggered before this cycle */
-            if (cpu->nmi && cpu->in_irq) {
+            if ((cpu->int_trig & CPU_STATE_NMI) && cpu->in_irq) {
                 CPU_STATE_CLEAR_IRQ(cpu);
-                cpu->nmi = 0;
+                cpu->int_trig &= ~CPU_STATE_NMI;
                 cpu->in_irq = 0;
                 cpu->in_nmi = 1;
             }
@@ -796,14 +809,11 @@ static int mode_stack_brk(MODE_PARAMS) {
             /* end instantly! */
             /* HW interrupts do not increment the instruction counter */
             if (!cpu->take) --cpu->total_instructions;
-#if !W65C02SCE_COARSE
-            cpu->cycl = 0;
-#endif
             SKIP_REST;
     END_INSTRUCTION
 }
 
-static unsigned mode_nop_5c(MODE_PARAMS) {
+static unsigned mode_nop_5c(PARAMS_MODE) {
     /* op = NOP $5C */
     BEGIN_INSTRUCTION
         CYCLE(1)
@@ -826,33 +836,42 @@ static unsigned mode_nop_5c(MODE_PARAMS) {
     END_INSTRUCTION
 }
 
-static unsigned mode_int_wait_stop(MODE_PARAMS) {
+static unsigned mode_int_wait_stop(PARAMS_MODE) {
     /* op = WAI/STP */
     BEGIN_INSTRUCTION
         CYCLE(1)
+            READ(cpu->pc);
             /* STP (1) or WAI (0) */
             cpu->take = cpu->oper == OPER_STP;
-            READ(cpu->pc);
 #if W65C02SCE_HOOK_STP
             if (cpu->take && cpu->hook_stp && (*cpu->hook_stp)()) SKIP_REST;
 #endif
         CYCLE(2)
             READ(cpu->pc);
-            if (!cpu->take && cpu->cpu_state == CPU_STATE_RUN) {
-                cpu->cpu_state = CPU_STATE_WAIT;
-                return 1; /* exit instantly if we entered WAI */
-            }
         CYCLE(3)
+            READ(cpu->pc);
             if (cpu->take) {
-                cpu->cpu_state = CPU_STATE_STOP;
-                return 1;
+                CPU_STATE_INSERT(cpu, CPU_STATE_STOP);
+            } else if (!cpu->take && CPU_STATE_EXTRACT_WITH_IRQ(cpu)
+                                        == CPU_STATE_RUN) {
+                CPU_STATE_INSERT(cpu, CPU_STATE_WAIT);
             }
-            SKIP_REST;
+#if !W65C02SCE_COARSE
+            cpu->cycl = 0;
+#endif
     END_INSTRUCTION
 }
 
-static unsigned mode_implied_1c(MODE_PARAMS) {
+static unsigned mode_implied_1c(PARAMS_MODE) {
     return 0; /* return immediately */
+}
+
+INTERNAL_INLINE void w65c02si_irq_update_mask(struct w65c02s_cpu *cpu) {
+    irq_update_mask(cpu);
+}
+
+INTERNAL_INLINE void w65c02si_stall(struct w65c02s_cpu *cpu) {
+    READ(cpu->pc);
 }
 
 INTERNAL_INLINE void w65c02si_irq_latch(struct w65c02s_cpu *cpu) {
@@ -872,8 +891,11 @@ INTERNAL void w65c02si_prerun_mode(struct w65c02s_cpu *cpu) {
 
 /* COARSE=0: true if there is still more to run, false if not */
 /* COARSE=1: number of cycles */
-INTERNAL unsigned w65c02si_run_mode(MODE_PARAMS) {
-#define CALL_MODE(mode)                   mode_##mode(cpu, cont)
+#if W65C02SCE_COARSE
+INTERNAL unsigned w65c02si_run_mode(struct w65c02s_cpu *cpu) {
+#else
+INTERNAL unsigned w65c02si_run_mode(struct w65c02s_cpu *cpu, unsigned cont) {
+#endif
     switch (cpu->mode) {
     case MODE_RMW_ZEROPAGE:        return CALL_MODE(rmw_zeropage);
     case MODE_RMW_ZEROPAGE_X:      return CALL_MODE(rmw_zeropage_x);
@@ -908,7 +930,6 @@ INTERNAL unsigned w65c02si_run_mode(MODE_PARAMS) {
     case MODE_INT_WAIT_STOP:       return CALL_MODE(int_wait_stop);
     case MODE_NOP_5C:              return CALL_MODE(nop_5c);
     }
-#undef CALL_MODE
     unreachable();
     return 0;
 }
