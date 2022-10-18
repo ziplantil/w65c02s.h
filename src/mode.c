@@ -15,14 +15,6 @@
 #include "modejump.h"
 #include "oper.h"
 
-#if W65C02SCE_LINK
-#define READ(a) w65c02s_read(a)
-#define WRITE(a, v) w65c02s_write(a, v)
-#else
-#define READ(a) (*cpu->mem_read)(cpu, a)
-#define WRITE(a, v) (*cpu->mem_write)(cpu, a, v)
-#endif
-
 INLINE void stack_push(struct w65c02s_cpu *cpu, uint8_t v) {
     uint16_t s = STACK_ADDR(cpu->s--);
     WRITE(s, v);
