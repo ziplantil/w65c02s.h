@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-18
+            version: 2022-10-19
 
             execute.c - instruction execution unit
 *******************************************************************************/
@@ -20,7 +20,9 @@ INLINE void handle_reset(struct w65c02s_cpu *cpu) {
     /* do RESET */
     cpu->in_rst = 1;
     cpu->in_nmi = cpu->in_irq = 0;
-    cpu->cpu_state = CPU_STATE_RUN;
+    CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
+    CPU_STATE_CLEAR_NMI(cpu);
+    CPU_STATE_CLEAR_IRQ(cpu);
     SET_P(P_A1, 1);
     SET_P(P_B, 1);
 }
@@ -58,8 +60,32 @@ INLINE void handle_end_of_instruction(struct w65c02s_cpu *cpu) {
 #endif
 }
 
+#if !W65C02SCE_COARSE_CYCLE_COUNTER
+#define SPENT_CYCLE             ++cpu->total_cycles
+#else
+#define SPENT_CYCLE
+#endif
+
 #define STARTING_INSTRUCTION 0
 #define CONTINUE_INSTRUCTION 1
+
+static int handle_stp_wai_i(struct w65c02s_cpu *cpu) {
+    switch (CPU_STATE_EXTRACT(cpu)) {
+        case CPU_STATE_WAIT:
+            /* if there is an IRQ or NMI, latch it immediately and continue */
+            if (cpu->int_trig) {
+                w65c02si_irq_latch(cpu);
+                CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
+                return 0;
+            }
+        case CPU_STATE_STOP:
+            /* spurious read to waste a cycle */
+            w65c02si_stall(cpu);
+            SPENT_CYCLE;
+            return 1;
+    }
+    return 0;
+}
 
 #if !W65C02SCE_COARSE
 
@@ -79,9 +105,8 @@ static int handle_stp_wai_c(struct w65c02s_cpu *cpu) {
             }
         case CPU_STATE_STOP:
             for (;;) {
-                if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_RESET) {
+                if (CPU_STATE_EXTRACT(cpu) == CPU_STATE_RESET)
                     return 0;
-                }
                 w65c02si_stall(cpu);
                 if (CYCLE_CONDITION) return 1;
             }
@@ -104,47 +129,29 @@ INTERNAL unsigned long w65c02si_execute_c(struct w65c02s_cpu *cpu,
             if (cpu->cycl) cpu->cycl += maximum_cycles;
             return maximum_cycles;
         }
-        handle_end_of_instruction(cpu);
-    } else if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
-        /* we are starting a new instruction and state isn't RUN.
-           we don't want STEP to trigget yet - we didn't run an instruction! */
-        goto bypass_step;
-    } else {
-        /* we are starting a new instruction and state is RUN. */
-        goto next_instruction;
+        goto end_of_instruction;
     }
+
+    /* new instruction, handle special states now */
+    if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN))
+        goto check_special_state;
 
     for (;;) {
         unsigned long cyclecount;
-#if W65C02SCE_COARSE_CYCLE_COUNTER
-#define CYCLES_NOW (maximum_cycles - cpu->left_cycles)
-#else
-#define CYCLES_NOW (cpu->total_cycles - (cpu->target_cycles - maximum_cycles))
-#endif
-        if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
-            if (cpu->cpu_state & CPU_STATE_STEP) {
-                cpu->cycl = 0;
-                return CYCLES_NOW;
-            }
-bypass_step:
-            if (handle_stp_wai_c(cpu)) return CYCLES_NOW;
-            if (handle_interrupt(cpu)) goto decoded;
-        }
 
-next_instruction:
         w65c02si_decode(cpu, READ(cpu->pc++));
         w65c02si_prerun_mode(cpu);
+        cpu->cycl = 1; /* interrupts don't need this -- no cycle skip in BRK */
 
 decoded:
 #if W65C02SCE_COARSE_CYCLE_COUNTER
-        cyclecount = --cpu->left_cycles;
-        if (UNLIKELY(!cyclecount)) break;
+        cyclecount = cpu->left_cycles;
 #else
-        cyclecount = ++cpu->total_cycles;
-        if (UNLIKELY(cyclecount == cpu->target_cycles)) break;
+        cyclecount = cpu->total_cycles;
 #endif
+        if (UNLIKELY(CYCLE_CONDITION))
+            return maximum_cycles;
 
-        cpu->cycl = 1;
         if (UNLIKELY(w65c02si_run_mode(cpu, STARTING_INSTRUCTION))) {
             if (cpu->cycl) {
 #if W65C02SCE_COARSE_CYCLE_COUNTER
@@ -157,32 +164,45 @@ decoded:
             }
             return maximum_cycles;
         }
-        handle_end_of_instruction(cpu);
-    }
-    return maximum_cycles;
-}
 
-#else /* W65C02SCE_COARSE */
-
-static int handle_stp_wai_i(struct w65c02s_cpu *cpu) {
-    switch (CPU_STATE_EXTRACT(cpu)) {
-        case CPU_STATE_WAIT:
-            /* if there is an IRQ or NMI, latch it immediately and continue */
-            if (cpu->int_trig) {
-                w65c02si_irq_latch(cpu);
-                CPU_STATE_INSERT(cpu, CPU_STATE_RUN);
-                return 0;
-            }
-        case CPU_STATE_STOP:
-            /* spurious read to waste a cycle */
-            w65c02si_stall(cpu);
-#if !W65C02SCE_COARSE_CYCLE_COUNTER
-            ++cpu->total_cycles;
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+#define CYCLES_NOW (maximum_cycles - cpu->left_cycles)
+#else
+#define CYCLES_NOW (maximum_cycles - (cpu->target_cycles - cpu->total_cycles))
 #endif
-            return 1;
+end_of_instruction:
+        handle_end_of_instruction(cpu);
+        if (UNLIKELY(cpu->cpu_state != CPU_STATE_RUN)) {
+check_special_state:
+            if (handle_stp_wai_c(cpu)) return CYCLES_NOW;
+            if (handle_interrupt(cpu)) goto decoded;
+        }
     }
-    return 0;
 }
+
+INLINE unsigned run_mode_and_return_cycles(struct w65c02s_cpu *cpu,
+                                           unsigned cont) {
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+    cpu->left_cycles = cont ? 0 : -1;
+#else
+    cpu->target_cycles = cpu->total_cycles - (cont ? 0 : 1);
+#endif
+    w65c02si_run_mode(cpu, cont);
+#if W65C02SCE_COARSE_CYCLE_COUNTER
+    return -cpu->left_cycles;
+#else
+    return cpu->total_cycles - cpu->target_cycles;
+#endif
+}
+
+INTERNAL unsigned long w65c02si_execute_ic(struct w65c02s_cpu *cpu) {
+    unsigned cycles;
+    cycles = run_mode_and_return_cycles(cpu, CONTINUE_INSTRUCTION);
+    handle_end_of_instruction(cpu);
+    return cycles;
+}
+
+#endif /* W65C02SCE_COARSE */
 
 INTERNAL unsigned long w65c02si_execute_i(struct w65c02s_cpu *cpu) {
     unsigned cycles;
@@ -194,14 +214,16 @@ INTERNAL unsigned long w65c02si_execute_i(struct w65c02s_cpu *cpu) {
     w65c02si_decode(cpu, READ(cpu->pc++));    
 decoded:
     w65c02si_prerun_mode(cpu);
-#if !W65C02SCE_COARSE_CYCLE_COUNTER
-    ++cpu->total_cycles;
-#endif
+    SPENT_CYCLE;
+
+#if !W65C02SCE_COARSE
+    cpu->cycl = 1; /* make sure we start at the first cycle */
+    cycles = run_mode_and_return_cycles(cpu, STARTING_INSTRUCTION);
+#else
     cycles = w65c02si_run_mode(cpu);
+#endif
     handle_end_of_instruction(cpu);
     return cycles;
 }
-
-#endif /* W65C02SCE_COARSE */
 
 #endif /* W65C02SCE_SEPARATE */

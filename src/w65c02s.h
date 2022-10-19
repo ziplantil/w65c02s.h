@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-18
+            version: 2022-10-19
 
             w65c02s.h - main emulator definitions (and external API)
 *******************************************************************************/
@@ -138,7 +138,6 @@ typedef unsigned short uint16_t;
 #define CPU_STATE_STOP 3
 #define CPU_STATE_IRQ 4
 #define CPU_STATE_NMI 8
-#define CPU_STATE_STEP 16
 
 #define CPU_STATE_EXTRACT(cpu)              ((cpu)->cpu_state & 3)
 #define CPU_STATE_EXTRACT_WITH_IRQ(cpu)     ((cpu)->cpu_state & 15)
@@ -281,6 +280,22 @@ extern void w65c02s_write(uint16_t address, uint8_t value);
  *  [Return value] The number of cycles that were actually run
  */
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles);
+
+/** w65c02s_step_instruction
+ *
+ *  Runs the CPU for one instruction, or if an instruction is already running,
+ *  finishes that instruction.
+ *
+ *  Prefer using w65c02s_run_instructions or w65c02s_run_cycles instead if you
+ *  can to run many instructions at once.
+ *
+ *  This function is not reentrant. Calling it from a callback (for a memory
+ *  read, write, STP, etc.) will result in undefined behavior.
+ *
+ *  [Parameter: cpu] The CPU instance to run
+ *  [Return value] The number of cycles that were actually run
+ */
+unsigned long w65c02s_step_instruction(struct w65c02s_cpu *cpu);
 
 /** w65c02s_run_instructions
  *

@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-18
+            version: 2022-10-19
 
             oper.c - opcodes and internal operations
 *******************************************************************************/

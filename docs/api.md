@@ -69,6 +69,23 @@ write, STP, etc.) will result in undefined behavior.
 * **Parameter** `cycles`: The number of cycles to run
 * **Return value**: The number of cycles that were actually run
 
+## w65c02s_step_instruction
+Runs the CPU for one instruction, or if an instruction is already running,
+finishes that instruction.
+
+```c
+unsigned long w65c02s_step_instruction(struct w65c02s_cpu *cpu);
+```
+
+Prefer using w65c02s_run_instructions or w65c02s_run_cycles instead if you can
+to run many instructions at once.
+
+This function is not reentrant. Calling it from a callback (for a memory read,
+write, STP, etc.) will result in undefined behavior.
+
+* **Parameter** `cpu`: The CPU instance to run
+* **Return value**: The number of cycles that were actually run
+
 ## w65c02s_run_instructions
 Runs the CPU for the given number of instructions.
 
@@ -194,7 +211,11 @@ Triggers a CPU reset.
 void w65c02s_reset(struct w65c02s_cpu *cpu);
 ```
 
-The RESET will begin executing before the next instruction.
+The RESET will begin executing before the next instruction. The RESET does not
+behave exactly like in the original chip, and will not carry out any extra
+cycles in between the end of the instruction and beginning of the reset (like
+some chips do). There is also no requirement that RESET be asserted before the
+last cycle, like with NMI or IRQ.
 
 * **Parameter** `cpu`: The CPU instance
 

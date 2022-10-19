@@ -9,7 +9,7 @@ ifdef DEBUG
 CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
 LFLAGS=
 else
-CFLAGS=-O2 -flto
+CFLAGS=-O3 -fno-tree-tail-merge -flto
 LFLAGS=-flto
 endif
 

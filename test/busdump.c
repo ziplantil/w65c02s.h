@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-18
+            version: 2022-10-19
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -16,7 +16,6 @@
 uint8_t ram[65536];
 FILE *dumpfile;
 struct w65c02s_cpu cpu;
-unsigned long cycles;
 unsigned long total_cycles;
 unsigned instruction_cycles;
 
@@ -40,18 +39,14 @@ void busdump(unsigned write, uint16_t addr, uint8_t data) {
 uint8_t w65c02s_read(uint16_t a) {
     busdump(0x00, a, ram[a]);
     ++instruction_cycles;
-    ++total_cycles;
     return ram[a];
 }
 
 void w65c02s_write(uint16_t a, uint8_t v) {
     busdump(0x80, a, v);
     ++instruction_cycles;
-    ++total_cycles;
     ram[a] = v;
 }
-
-uint16_t vector = 0;
 
 static size_t loadmemfromfile(const char *filename) {
     FILE *file = fopen(filename, "rb");
@@ -68,6 +63,9 @@ static size_t loadmemfromfile(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
+    uint16_t vector;
+    unsigned long cycles;
+
     if (argc <= 4) {
         printf("%s <file_in> <vector> <cyclecount> <file_out>\n", argv[0]);
         return EXIT_FAILURE;
@@ -93,7 +91,7 @@ int main(int argc, char *argv[]) {
     total_cycles = 0;
     while (total_cycles < cycles) {
         instruction_cycles = 0;
-        w65c02s_run_instructions(&cpu, 1, 0);
+        total_cycles += w65c02s_step_instruction(&cpu);
     }
 
     fclose(dumpfile);

@@ -1,7 +1,7 @@
 /*******************************************************************************
             w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-18
+            version: 2022-10-19
 
             monitor.c - test monitor
 *******************************************************************************/
@@ -1241,9 +1241,9 @@ static void dumpregs(void) {
             cpu.cycl);
     if ((cpu.cpu_state & 3) == 1)
         printf("RESET    ");
-    if (cpu.nmi)
+    if (cpu.int_trig & 8)
         printf("NMI      ");
-    if (cpu.irq)
+    if (cpu.int_trig & 4)
         printf("IRQ      ");
     if (w65c02s_is_cpu_stopped(&cpu))
         printf("STP");
@@ -1281,7 +1281,7 @@ static void dumpstate(void) {
 }
 
 static void runcpu(void) {
-    uint16_t prev_pc = w65c02s_reg_get_pc(&cpu) - 1;
+    uint16_t prev_pc;
     for (;;) {
         uint16_t pc = w65c02s_reg_get_pc(&cpu);
         if (pc == address_go) {
@@ -1291,7 +1291,9 @@ static void runcpu(void) {
             printf("Reached breakpoint at $%04X\n", pc);
             break;
         }
+        prev_pc = pc;
         w65c02s_run_instructions(&cpu, 1, 0);
+        pc = w65c02s_reg_get_pc(&cpu);
         if (w65c02s_is_cpu_stopped(&cpu)) {
             puts("CPU hit STP");
             break;
@@ -1302,7 +1304,6 @@ static void runcpu(void) {
             puts("Infinite loop detected");
             break;
         }
-        prev_pc = pc;
     }
 }
 
@@ -1414,6 +1415,7 @@ static void processline(void) {
             printf("PC=$%04X\n", w65c02s_reg_get_pc(&cpu));
             if ((cpu.cpu_state & 3) == 1 || cpu.in_rst)
                 puts("CPU is resetting and will overwrite this value");
+            dumpstate();
             break;
         case 'L':
             address_load = 0;
