@@ -1,7 +1,8 @@
 /*******************************************************************************
-            w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
+            w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
+                         as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-19
+            version: 2022-10-20
 
             monitor.c - test monitor
 *******************************************************************************/
@@ -11,11 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "w65c02s.h"
-
 #if W65C02S_COARSE
 #error the monitor does not support compiling in coarse emulation mode
 #endif
+
+#define W65C02S_IMPL 1
+#include "w65c02s.h"
 
 uint8_t ram[65536];
 uint8_t breakpoints[65536];

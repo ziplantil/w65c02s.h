@@ -10,6 +10,6 @@ Notes about w65c02s and its development:
   seems to occur due to -ftree-tail-merge, which causes extra range checks to
   be added to switch statements, despite __builtin_unreachable() being used.
   Is this a gcc bug?
-* The case of W65C02SCE_COARSE=0 could be optimized greatly by eliminating
+* The case of W65C02S_COARSE=0 could be optimized greatly by eliminating
   the "cont = 0" branch entirely, but that does not seem possible in C89, even
   with compiler extensions.

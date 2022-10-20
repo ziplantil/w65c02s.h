@@ -1,7 +1,3 @@
-```c
-#include "w65c02s.h"
-```
-
 ## w65c02s_init
 Initializes a new CPU instance.
 
@@ -12,13 +8,12 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
                   void *cpu_data);
 ```
 
-mem_read and mem_write only need to be specified if `W65C02SCE_LINK` is set to
-0. If set to 1, they may simply be passed as NULL.
+mem_read and mem_write only need to be specified if `W65C02S_LINK` is set to 0.
+If set to 1, they may simply be passed as NULL.
 
 * **Parameter** `cpu`: The CPU instance to run
-* **Parameter** `mem_read`: The read callback, ignored if `W65C02SCE_LINK` is
-  1.
-* **Parameter** `mem_write`: The write callback, ignored if `W65C02SCE_LINK` is
+* **Parameter** `mem_read`: The read callback, ignored if `W65C02S_LINK` is 1.
+* **Parameter** `mem_write`: The write callback, ignored if `W65C02S_LINK` is
   1.
 * **Parameter** `cpu_data`: The pointer to be returned by
   w65c02s_get_cpu_data().
@@ -31,8 +26,8 @@ Reads a value from memory.
 extern uint8_t w65c02s_read(uint16_t address);
 ```
 
-This method only exists if the library is compiled with `W65C02SCE_LINK`. In
-that case, you must provide an implementation.
+This method only exists if the library is compiled with `W65C02S_LINK`. In that
+case, you must provide an implementation.
 
 * **Parameter** `address`: The 16-bit address to read from
 * **Return value**: The value read from memory
@@ -44,8 +39,8 @@ Writes a value to memory.
 extern void w65c02s_write(uint16_t address, uint8_t value);
 ```
 
-This method only exists if the library is compiled with `W65C02SCE_LINK`. In
-that case, you must provide an implementation.
+This method only exists if the library is compiled with `W65C02S_LINK`. In that
+case, you must provide an implementation.
 
 * **Parameter** `address`: The 16-bit address to write to
 * **Parameter** `value`: The value to write
@@ -57,10 +52,10 @@ Runs the CPU for the given number of cycles.
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu, unsigned long cycles);
 ```
 
-If w65c02ce is compiled with `W65C02SCE_COARSE`, the actual number of cycles
+If w65c02ce is compiled with `W65C02S_COARSE`, the actual number of cycles
 executed may not always match the given argument, but the return value is
-always correct. Without `W65C02SCE_COARSE` the return value is always the same
-as `cycles`.
+always correct. Without `W65C02S_COARSE` the return value is always the same as
+`cycles`.
 
 This function is not reentrant. Calling it from a callback (for a memory read,
 write, STP, etc.) will result in undefined behavior.
@@ -119,7 +114,7 @@ Gets the total number of cycles executed by this CPU.
 unsigned long w65c02s_get_cycle_count(const struct w65c02s_cpu *cpu);
 ```
 
-If the library has been compiled with `W65C02SCE_COARSE_CYCLE_COUNTER`, this
+If the library has been compiled with `W65C02S_COARSE_CYCLE_COUNTER`, this
 value might not be updated between calls to `w65c02s_run_cycles` or
 `w65c02s_run_instructions`.
 
@@ -277,12 +272,12 @@ normal.
 Passing NULL as the hook disables the hook.
 
 This function does nothing if the library was not compiled with
-`W65C02SCE_HOOK_BRK`.
+`W65C02S_HOOK_BRK`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `brk_hook`: The new BRK hook
 * **Return value**: Whether the hook was set (0 only if the library was
-  compiled without `W65C02SCE_HOOK_BRK`)
+  compiled without `W65C02S_HOOK_BRK`)
 
 ## w65c02s_hook_stp
 Hooks the STP instruction on the CPU.
@@ -297,12 +292,12 @@ the STP instruction is skipped, and otherwise it is treated as normal.
 Passing NULL as the hook disables the hook.
 
 This function does nothing if the library was not compiled with
-`W65C02SCE_HOOK_STP`.
+`W65C02S_HOOK_STP`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `stp_hook`: The new STP hook
 * **Return value**: Whether the hook was set (0 only if the library was
-  compiled without `W65C02SCE_HOOK_STP`)
+  compiled without `W65C02S_HOOK_STP`)
 
 ## w65c02s_hook_end_of_instruction
 Hooks the end-of-instruction on the CPU.
@@ -318,12 +313,12 @@ finishes. The interrupt entering routine counts as an instruction here.
 Passing NULL as the hook disables the hook.
 
 This function does nothing if the library was not compiled with
-`W65C02SCE_HOOK_EOI`.
+`W65C02S_HOOK_EOI`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `instruction_hook`: The new end-of-instruction hook
 * **Return value**: Whether the hook was set (0 only if the library was
-  compiled without `W65C02SCE_HOOK_EOI`)
+  compiled without `W65C02S_HOOK_EOI`)
 
 ## w65c02s_reg_get_a
 Returns the value of the A register on the CPU.
@@ -342,9 +337,6 @@ Returns the value of the X register on the CPU.
 uint8_t w65c02s_reg_get_x(const struct w65c02s_cpu *cpu);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the X register
 
@@ -354,9 +346,6 @@ Returns the value of the Y register on the CPU.
 ```c
 uint8_t w65c02s_reg_get_y(const struct w65c02s_cpu *cpu);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the Y register
@@ -368,9 +357,6 @@ Returns the value of the P (processor status) register on the CPU.
 uint8_t w65c02s_reg_get_p(const struct w65c02s_cpu *cpu);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the P register
 
@@ -380,9 +366,6 @@ Returns the value of the S (stack pointer) register on the CPU.
 ```c
 uint8_t w65c02s_reg_get_s(const struct w65c02s_cpu *cpu);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the S register
@@ -394,9 +377,6 @@ Returns the value of the PC (program counter) register on the CPU.
 uint16_t w65c02s_reg_get_pc(const struct w65c02s_cpu *cpu);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: The value of the PC register
 
@@ -406,9 +386,6 @@ Replaces the value of the A register on the CPU.
 ```c
 void w65c02s_reg_set_a(struct w65c02s_cpu *cpu, uint8_t v);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the A register
@@ -420,9 +397,6 @@ Replaces the value of the X register on the CPU.
 void w65c02s_reg_set_x(struct w65c02s_cpu *cpu, uint8_t v);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the X register
 
@@ -432,9 +406,6 @@ Replaces the value of the Y register on the CPU.
 ```c
 void w65c02s_reg_set_y(struct w65c02s_cpu *cpu, uint8_t v);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the Y register
@@ -446,9 +417,6 @@ Replaces the value of the P (processor status) register on the CPU.
 void w65c02s_reg_set_p(struct w65c02s_cpu *cpu, uint8_t v);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the P register
 
@@ -459,9 +427,6 @@ Replaces the value of the S (stack pointer) register on the CPU.
 void w65c02s_reg_set_s(struct w65c02s_cpu *cpu, uint8_t v);
 ```
 
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
-
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the S register
 
@@ -471,9 +436,6 @@ Replaces the value of the PC (program counter) register on the CPU.
 ```c
 void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v);
 ```
-
-This method is only available if the code was compiled with the flag
-`W65C02SCE_HOOK_REGS`.
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `v`: The new value of the PC register

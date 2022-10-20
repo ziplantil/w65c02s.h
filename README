@@ -1,13 +1,13 @@
-==== w65c02sce -- cycle-accurate WDC 65C02S emulator in portable C =============
+==== w65c02s.h -- cycle-accurate WDC 65C02S emulator in portable C =============
 
-This library (in src/) is designed to be statically linked, but
-in theory it could be dynamically linked as well.
+This is a single header-only library (w65c02s.h in include/).
 
 ==== Features ==================================================================
 * Portable C (C89, only freestanding headers in main library code)
 * Supports all W65C02S instructions (6502, CMOS, Rockwell bit, WAI+STP)
 * High accuracy, down to memory read/write level
 * High performance, optimized well by compilers
+* C++ compatible
 * (If enabled by flag) Can stop mid-instruction when running cycle by cycle
 
 ==== Tests =====================================================================
@@ -20,15 +20,18 @@ in theory it could be dynamically linked as well.
   Multithreaded access on the same CPU will result in undefined behavior.
 
 ==== Building ==================================================================
-* Statically linked. See docs/defines.md for defines.
+* Single-header library. Define W65C02S_IMPL and include in ONE file.
+* Since this header can be configured by defines, you should probably ever
+  include it in only that one file.
+* See docs/defines.md for defines.
 * test/ contains testing programs (like monitor, build with make monitor).
 
 ==== License ===================================================================
-w65c02sce by ziplantil
+w65c02s.h by ziplantil
 
 To the extent possible under law, the person who associated CC0 with
-w65c02sce has waived all copyright and related or neighboring rights
-to w65c02sce.
+w65c02s.h has waived all copyright and related or neighboring rights
+to w65c02s.h.
 
 You should have received a copy of the CC0 legalcode along with this
 work.  If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.

@@ -1,7 +1,8 @@
 /*******************************************************************************
-            w65c02sce -- cycle-accurate C emulator of the WDC 65C02S
+            w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
+                         as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-19
+            version: 2022-10-20
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -12,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#define W65C02S_IMPL 1
 #include "w65c02s.h"
 
 #if __STDC_VERSION__ >= 201112L

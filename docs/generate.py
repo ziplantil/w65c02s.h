@@ -53,14 +53,10 @@ def convert(file, text, signature):
             subsequent_indent="  ")), file = file)
     print("", file = file)
 
-with open("../src/w65c02s.h", "r") as source_file:
-    source = source_file.read()
+with open("../include/w65c02s.h", "r") as source_file:
+    source = source_file.read().split("#if W65C02S_IMPL")[0]
 
 with open("api.md", "w") as target:
-    print("""```c
-#include "w65c02s.h"
-```
-""", file = target)
     for comment_block, signature in re.findall(r"(?s)(/\*\* .+?\*/)([^;]*?;)", source):
-        comment_block = re.sub(r"(W65C02SCE_[A-Z0-9_]+)", r"`\1`", comment_block)
+        comment_block = re.sub(r"(W65C02S_[A-Z0-9_]+)", r"`\1`", comment_block)
         convert(target, comment_block, signature)

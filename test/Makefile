@@ -1,5 +1,5 @@
 -include config.inc
-LIBPATH=../src
+LIBPATH=../include
 
 CC=cc
 LD=$(CC)
@@ -13,7 +13,9 @@ CFLAGS=-O3 -fno-tree-tail-merge -flto
 LFLAGS=-flto
 endif
 
-CEFLAGS=-DW65C02SCE_LINK=1
+HEADERS=../include/w65c02s.h
+
+CEFLAGS=-DW65C02S_LINK=1
 
 ifdef PROFILE
 CFLAGS:=$(CFLAGS) -pg -g2
@@ -21,26 +23,20 @@ LFLAGS:=$(LFLAGS) -pg
 endif
 
 ifdef COARSE
-CEFLAGS:=$(CEFLAGS) -DW65C02SCE_COARSE=1
+CEFLAGS:=$(CEFLAGS) -DW65C02S_COARSE=1
 endif
 
 ifdef COARSE_CYCLE_COUNTER
-CEFLAGS:=$(CEFLAGS) -DW65C02SCE_COARSE_CYCLE_COUNTER=1
-endif
-
-ifdef SEPARATE
-LIBFILES=$(LIBPATH)/decode.o $(LIBPATH)/execute.o $(LIBPATH)/mode.o			   \
-		 $(LIBPATH)/oper.o $(LIBPATH)/w65c02s.o
-CFLAGS:=$(CFLAGS) -DW65C02SCE_SEPARATE=1
-else
-LIBFILES=$(LIBPATH)/w65c02s.o
+CEFLAGS:=$(CEFLAGS) -DW65C02S_COARSE_CYCLE_COUNTER=1
 endif
 
 PROGS=monitor busdump benchmark
 
 .PHONY: all clean
 
-%.o: %.c
+all: $(PROGS) 
+
+%.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) $(CEFLAGS) -I$(LIBPATH) -c -o $@ $<
 
 monitor: $(LIBFILES) monitor.o
@@ -51,8 +47,6 @@ busdump: $(LIBFILES) busdump.o
 
 benchmark: $(LIBFILES) benchmark.o
 	$(LD) -o $@ $^ $(LFLAGS)
-
-all: $(PROGS) 
 
 clean:
 	$(RM) ../src/*.o *.o $(PROGS)
