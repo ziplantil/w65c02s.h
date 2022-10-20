@@ -79,12 +79,13 @@
 #define W65C02S_MSVC 1
 #endif
 
+#include <limits.h>
+
 #if W65C02S_HAS_UINTN_T
 /* do nothing, we have these types */
 #elif W65C02S_C99 || HAS_STDINT_H || HAS_STDINT
 #include <stdint.h>
 #else
-#include <limits.h>
 #if UCHAR_MAX == 255
 typedef unsigned char uint8_t;
 #else
@@ -1245,7 +1246,7 @@ static bool w65c02s_oper_addr(struct w65c02s_cpu *cpu, uint16_t a) {
         case W65C02S_OPER_AND:
         case W65C02S_OPER_EOR:
         case W65C02S_OPER_ORA:
-            cpu->a = w65c02s_oper_alu(cpu, oper, cpu->a, v);
+            cpu->a = w65c02s_oper_alu(cpu, oper, cpu->a, W65C02S_READ(a));
             return 0;
 
         case W65C02S_OPER_ADC:
