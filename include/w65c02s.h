@@ -2,8 +2,15 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-21
+            version: 2022-10-22
+            please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
+
+#ifdef __cplusplus
+extern "C" {
+#undef W65C02S_HAS_BOOL
+#define W65C02S_HAS_BOOL 1
+#endif
 
 #ifndef W65C02S_H
 #define W65C02S_H
@@ -641,8 +648,9 @@ struct w65c02s_cpu {
 #define W65C02S_INLINE static
 #endif
 
-#if W65C02S_C23
 #include <stddef.h>
+
+#if W65C02S_C23
 #define W65C02S_UNREACHABLE() unreachable()
 #define W65C02S_ASSUME(x) do { if (!(x)) unreachable(); } while (0)
 #elif W65C02S_GNUC
@@ -1045,7 +1053,7 @@ static uint8_t w65c02s_oper_adc_d(struct w65c02s_cpu *cpu,
     W65C02S_SET_P_ADJ(W65C02S_P_C, fc);
     /* keep W65C02S_P_V as in binary addition */
     W65C02S_SET_P(W65C02S_P_C, fc);
-    return q;
+    return (uint8_t)q;
 }
 
 static uint8_t w65c02s_oper_sbc_d(struct w65c02s_cpu *cpu,
@@ -1068,13 +1076,13 @@ static uint8_t w65c02s_oper_sbc_d(struct w65c02s_cpu *cpu,
     W65C02S_SET_P_ADJ(W65C02S_P_C, fc);
     /* keep W65C02S_P_V as in binary addition */
     W65C02S_SET_P(W65C02S_P_C, fc);
-    return q;
+    return (uint8_t)q;
 }
 
 W65C02S_INLINE uint8_t w65c02s_oper_adc(struct w65c02s_cpu *cpu,
                                         uint8_t a, uint8_t b) {
     uint8_t r;
-    unsigned c = W65C02S_GET_P(W65C02S_P_C);
+    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
     W65C02S_SET_P(W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
     r = w65c02s_mark_nzc8(cpu, a + b + c);
     if (!W65C02S_GET_P(W65C02S_P_D)) return r;
@@ -1084,7 +1092,7 @@ W65C02S_INLINE uint8_t w65c02s_oper_adc(struct w65c02s_cpu *cpu,
 W65C02S_INLINE uint8_t w65c02s_oper_sbc(struct w65c02s_cpu *cpu,
                                         uint8_t a, uint8_t b) {
     uint8_t r;
-    unsigned c = W65C02S_GET_P(W65C02S_P_C);
+    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
     b = ~b;
     W65C02S_SET_P(W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
     r = w65c02s_mark_nzc8(cpu, a + b + c);
@@ -1816,7 +1824,7 @@ static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
             cpu->tr[0] += cpu->x;
             if (!overflow && w65c02s_fast_rmw_absx(cpu->oper))
                 W65C02S_SKIP_TO_NEXT(4);
-            cpu->tr[1] += overflow;
+            cpu->tr[1] += (uint8_t)overflow;
         }
             W65C02S_READ(W65C02S_GET_T16(0));
         W65C02S_CYCLE(4)
@@ -2009,10 +2017,10 @@ static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(2)
             cpu->tr[1] = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(3)
-            cpu->tr[1] = -1;
+            cpu->tr[1] = (uint8_t)-1;
             W65C02S_READ(W65C02S_GET_T16(0));
         W65C02S_CYCLE(4)
-            cpu->tr[0] = -1;
+            cpu->tr[0] = (uint8_t)-1;
             W65C02S_READ(W65C02S_GET_T16(0));
         W65C02S_CYCLE(5)
             W65C02S_READ(W65C02S_GET_T16(0));
@@ -2054,9 +2062,11 @@ static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_implied_1c(W65C02S_PARAMS_MODE) {
+    (void)cpu;
 #if W65C02S_COARSE
     return 1; /* spent 1 cycle doing nothing */
 #else
+    (void)cont;
     return 0; /* return immediately */
 #endif
 }
@@ -2672,6 +2682,9 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
 #if !W65C02S_LINK
     cpu->mem_read = mem_read ? mem_read : &w65c02s_openbus_read;
     cpu->mem_write = mem_write ? mem_write : &w65c02s_openbus_write;
+#else
+    (void)mem_read;
+    (void)mem_write;
 #endif
     cpu->hook_brk = NULL;
     cpu->hook_stp = NULL;
@@ -2788,6 +2801,8 @@ bool w65c02s_hook_brk(struct w65c02s_cpu *cpu, bool (*brk_hook)(uint8_t)) {
     cpu->hook_brk = brk_hook;
     return true;
 #else
+    (void)cpu;
+    (void)brk_hook;
     return false;
 #endif
 }
@@ -2798,6 +2813,8 @@ bool w65c02s_hook_stp(struct w65c02s_cpu *cpu, bool (*stp_hook)(void)) {
     cpu->hook_stp = stp_hook;
     return true;
 #else
+    (void)cpu;
+    (void)stp_hook;
     return false;
 #endif
 }
@@ -2808,6 +2825,8 @@ bool w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
     cpu->hook_eoi = instruction_hook;
     return true;
 #else
+    (void)cpu;
+    (void)instruction_hook;
     return false;
 #endif
 }
@@ -2894,3 +2913,7 @@ void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v) {
 }
 
 #endif /* W65C02S_IMPL */
+
+#ifdef __cplusplus
+}
+#endif
