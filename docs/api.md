@@ -87,7 +87,7 @@ Runs the CPU for the given number of instructions.
 ```c
 unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
                                        unsigned long instructions,
-                                       int finish_existing);
+                                       bool finish_existing);
 ```
 
 finish_existing only matters if the CPU is currently mid-instruction. If it is,
@@ -185,6 +185,28 @@ bool w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu);
 * **Parameter** `cpu`: The CPU instance
 * **Return value**: Whether the CPU ran a STP instruction
 
+## w65c02s_break
+Triggers a CPU break.
+
+```c
+void w65c02s_break(struct w65c02s_cpu *cpu);
+```
+
+If w65c02s_run_cycles or w65c02s_run_instructions is running, it will return as
+soon as possible. In coarse mode, this will finish the current instruction.
+
+In non-coarse mode, it will finish the current cycle. Note that this means that
+if `w65c02s_get_cycle_count` returns 999 (i.e. 999 cycles have been run), the
+cycle count will tick over to 1000 before the run call returns. This is because
+the thousandth cycle will still get finished.
+
+If the CPU is not running, the function does nothing.
+
+This function is designed to be called from callbacks (e.g. memory access or
+end of instruction).
+
+* **Parameter** `cpu`: The CPU instance
+
 ## w65c02s_nmi
 Queues a NMI (non-maskable interrupt) on the CPU.
 
@@ -261,7 +283,7 @@ This corresponds to the S/O pin on the physical CPU.
 Hooks the BRK instruction on the CPU.
 
 ```c
-int w65c02s_hook_brk(struct w65c02s_cpu *cpu, int (*brk_hook)(uint8_t));
+bool w65c02s_hook_brk(struct w65c02s_cpu *cpu, bool (*brk_hook)(uint8_t));
 ```
 
 The hook function should take a single uint8_t parameter, which corresponds to
@@ -276,14 +298,14 @@ This function does nothing if the library was not compiled with
 
 * **Parameter** `cpu`: The CPU instance
 * **Parameter** `brk_hook`: The new BRK hook
-* **Return value**: Whether the hook was set (0 only if the library was
+* **Return value**: Whether the hook was set (false only if the library was
   compiled without `W65C02S_HOOK_BRK`)
 
 ## w65c02s_hook_stp
 Hooks the STP instruction on the CPU.
 
 ```c
-int w65c02s_hook_stp(struct w65c02s_cpu *cpu, int (*stp_hook)(void));
+bool w65c02s_hook_stp(struct w65c02s_cpu *cpu, bool (*stp_hook)(void));
 ```
 
 The hook function should take no parameters. If it returns a non-zero value,
@@ -303,8 +325,8 @@ This function does nothing if the library was not compiled with
 Hooks the end-of-instruction on the CPU.
 
 ```c
-int w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
-                                    void (*instruction_hook)(void));
+bool w65c02s_hook_end_of_instruction(struct w65c02s_cpu *cpu,
+                                     void (*instruction_hook)(void));
 ```
 
 The hook function should take no parameters. It is called when an instruction

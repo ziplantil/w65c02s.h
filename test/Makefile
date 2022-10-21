@@ -9,7 +9,7 @@ ifdef DEBUG
 CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
 LFLAGS=
 else
-CFLAGS=-O3 -fno-tree-tail-merge -flto
+CFLAGS=-O1 -flto
 LFLAGS=-flto
 endif
 
@@ -30,7 +30,7 @@ ifdef COARSE_CYCLE_COUNTER
 CEFLAGS:=$(CEFLAGS) -DW65C02S_COARSE_CYCLE_COUNTER=1
 endif
 
-PROGS=monitor busdump benchmark
+PROGS=monitor busdump benchmark breaktest
 
 .PHONY: all clean
 
@@ -46,6 +46,9 @@ busdump: $(LIBFILES) busdump.o
 	$(LD) -o $@ $^ $(LFLAGS)
 
 benchmark: $(LIBFILES) benchmark.o
+	$(LD) -o $@ $^ $(LFLAGS)
+
+breaktest: $(LIBFILES) breaktest.o
 	$(LD) -o $@ $^ $(LFLAGS)
 
 clean:
