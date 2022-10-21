@@ -15,7 +15,7 @@ endif
 
 HEADERS=../include/w65c02s.h
 
-CEFLAGS=-DW65C02S_LINK=1
+CEFLAGS=
 
 ifdef PROFILE
 CFLAGS:=$(CFLAGS) -pg -g2

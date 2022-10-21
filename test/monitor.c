@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-20
+            version: 2022-10-21
 
             monitor.c - test monitor
 *******************************************************************************/
@@ -17,6 +17,7 @@
 #endif
 
 #define W65C02S_IMPL 1
+#define W65C02S_LINK 1
 #include "w65c02s.h"
 
 uint8_t ram[65536];

@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-20
+            version: 2022-10-21
 *******************************************************************************/
 
 #ifndef W65C02S_H
@@ -2009,7 +2009,11 @@ static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_implied_1c(W65C02S_PARAMS_MODE) {
+#if W65C02S_COARSE
+    return 1; /* spent 1 cycle doing nothing */
+#else
     return 0; /* return immediately */
+#endif
 }
 
 static void w65c02s_prerun_mode(struct w65c02s_cpu *cpu) {
