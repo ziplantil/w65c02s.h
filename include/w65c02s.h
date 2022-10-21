@@ -673,6 +673,7 @@ struct w65c02s_cpu {
 #define W65C02S_CPU_STATE_BREAK 128
 
 #define W65C02S_CPU_STATE_EXTRACT(S)                ((S) & 3)
+#define W65C02S_CPU_STATE_EXTRACT_WITH_INTS(S)      ((S) & 127)
 #define W65C02S_CPU_STATE_INSERT(S, s)              ((S) = ((S) & ~3) | (s))
 
 #define W65C02S_CPU_STATE_HAS_FLAG(cpu, f)          ((cpu)->cpu_state & (f))
@@ -2041,7 +2042,8 @@ static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
             if (cpu->take) {
                 W65C02S_CPU_STATE_INSERT(cpu->cpu_state,
                                          W65C02S_CPU_STATE_STOP);
-            } else if (cpu->cpu_state == W65C02S_CPU_STATE_RUN) {
+            } else if (W65C02S_CPU_STATE_EXTRACT_WITH_INTS(cpu->cpu_state)
+                        == W65C02S_CPU_STATE_RUN && !cpu->int_trig) {
                 W65C02S_CPU_STATE_INSERT(cpu->cpu_state,
                                          W65C02S_CPU_STATE_WAIT);
             }
