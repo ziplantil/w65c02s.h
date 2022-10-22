@@ -17,6 +17,8 @@
 #define W65C02S_LINK 1
 #include "w65c02s.h"
 
+#define INSTRS 0
+
 #if __STDC_VERSION__ >= 201112L
 _Alignas(128)
 #endif
@@ -50,9 +52,15 @@ static size_t loadmemfromfile(const char *filename) {
 
 int main(int argc, char *argv[]) {
     double start, end;
+    const int tries = 10;
+    int i;
 
     if (argc <= 3) {
+#if INSTRS
+        printf("%s <file_in> <vector> <instrcount>\n", argv[0]);
+#else
         printf("%s <file_in> <vector> <cyclecount>\n", argv[0]);
+#endif
         return EXIT_FAILURE;
     }
 
@@ -62,20 +70,35 @@ int main(int argc, char *argv[]) {
 
     vector = strtoul(argv[2], NULL, 16);
     cycles = strtoul(argv[3], NULL, 0);
+#if INSTRS
+    printf("Running %lu instructions\n", cycles);
+#else
+    printf("Running %lu cycles\n", cycles);
+#endif
 
     w65c02s_init(&cpu, NULL, NULL, NULL);
-    /* RESET cycles */
-    w65c02s_run_cycles(&cpu, 7);
-    cpu.pc = vector;
     
-    start = (double)clock() / CLOCKS_PER_SEC;
-    w65c02s_run_cycles(&cpu, cycles);
-    end = (double)clock() / CLOCKS_PER_SEC;
-#if __STDC_VERSION__ >= 199901L
-    printf("%lf s\n", end - start);
+    for (i = 0; i < tries; ++i) {
+        unsigned long cycles_run;
+
+        w65c02s_reset(&cpu);
+        /* RESET cycles */
+        w65c02s_run_instructions(&cpu, 1, false);
+        cpu.pc = vector;
+        
+        start = (double)clock() * 1000 / CLOCKS_PER_SEC;
+#if INSTRS
+        cycles_run = w65c02s_run_instructions(&cpu, cycles, false);
 #else
-    printf("%f s\n", end - start);
+        cycles_run = w65c02s_run_cycles(&cpu, cycles);
+#endif        
+        end = (double)clock() * 1000 / CLOCKS_PER_SEC;
+#if __STDC_VERSION__ >= 199901L
+        printf("%lf ms (%ld cyc)\n", end - start, cycles_run);
+#else
+        printf("%f ms (%ld cyc)\n", end - start, cycles_run);
 #endif
+    }
 
     return EXIT_SUCCESS;
 }
