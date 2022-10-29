@@ -12,10 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if W65C02S_COARSE
-#error the monitor does not support compiling in coarse emulation mode
-#endif
-
 #define W65C02S_IMPL 1
 #define W65C02S_LINK 1
 #include "w65c02s.h"
@@ -1238,10 +1234,16 @@ static void dumpregs(void) {
     uint8_t p = w65c02s_reg_get_p(&cpu);
     unsigned i;
 
+#if W65C02S_COARSE
+    printf("CC=%010lu  CI=%010lu  IC=???   ",
+            w65c02s_get_cycle_count(&cpu),
+            w65c02s_get_instruction_count(&cpu));
+#else
     printf("CC=%010lu  CI=%010lu  IC=%d    ",
             w65c02s_get_cycle_count(&cpu),
             w65c02s_get_instruction_count(&cpu),
             cpu.cycl);
+#endif
     if ((cpu.cpu_state & 3) == 1)
         printf("RESET    ");
     if (cpu.int_trig & 8)

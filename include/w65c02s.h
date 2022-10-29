@@ -627,7 +627,7 @@ struct w65c02s_temp_rmw8 {
 };
 
 struct w65c02s_temp_brk {
-    uint8_t ea; /* effective address */
+    uint16_t ea; /* effective address */
     bool is_brk; /* is this BRK? */
 };
 
@@ -1244,7 +1244,7 @@ W65C02S_INLINE void w65c02s_oper_cmp(struct w65c02s_cpu *cpu,
 /* BIT a, b = update Z based on a & b, copy P bits 7 and 6 (N, V) from b. */
 static void w65c02s_oper_bit(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     /* in BIT, N (b7) and V (b6) are bits 7 and 6 of the memory operand */
-    cpu->p = (b & 0x40) | (cpu->p & 0x3F);
+    cpu->p = (b & 0xC0) | (cpu->p & 0x3F);
     W65C02S_SET_P(W65C02S_P_Z, !(a & b));
 }
 
@@ -1369,6 +1369,10 @@ static uint16_t w65c02s_irq_select_vector(struct w65c02s_cpu *cpu) {
         cpu->in_irq = false;
     }
     return W65C02S_VEC_IRQ;
+}
+
+W65C02S_INLINE uint16_t w65c02s_compute_branch(uint16_t pc, uint8_t offset) {
+    return pc + offset - (offset & 0x80 ? 0x100 : 0);
 }
 
 
@@ -1671,9 +1675,13 @@ static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            W65C02S_TR.ea_wrong = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->x)
-                                    ? W65C02S_TR.ea : cpu->pc;
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->x;
+        {
+            bool page_crossed;
+            W65C02S_TR.ea += cpu->x;
+            page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8);
+            W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
+        }
         W65C02S_CYCLE(3)
             W65C02S_READ(W65C02S_TR.ea_wrong);
             w65c02s_irq_latch(cpu);
@@ -1713,9 +1721,13 @@ static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            W65C02S_TR.ea_wrong = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y)
-                                    ? W65C02S_TR.ea : cpu->pc;
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->y;
+        {
+            bool page_crossed;
+            W65C02S_TR.ea += cpu->y;
+            page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8);
+            W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
+        }
         W65C02S_CYCLE(3)
             W65C02S_READ(W65C02S_TR.ea_wrong);
             w65c02s_irq_latch(cpu);
@@ -1769,7 +1781,7 @@ static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            W65C02S_TR.zp = W65C02S_READ(cpu->pc);
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
             W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(3)
@@ -1795,7 +1807,7 @@ static unsigned w65c02s_mode_zeropage_indirect_y_store(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            W65C02S_TR.zp = W65C02S_READ(cpu->pc);
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
             W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(3)
@@ -1879,7 +1891,7 @@ static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
             uint8_t offset = W65C02S_READ(cpu->pc++);
             uint16_t pc = cpu->pc;
             W65C02S_TR.old_pc = pc;
-            W65C02S_TR.new_pc = pc + offset - (offset & 0x80 ? 0x100 : 0);
+            W65C02S_TR.new_pc = w65c02s_compute_branch(pc, offset);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(2)
@@ -1911,7 +1923,7 @@ static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
             uint8_t offset = W65C02S_READ(cpu->pc++);
             uint16_t pc = cpu->pc;
             W65C02S_TR.old_pc = pc;
-            W65C02S_TR.new_pc = pc + offset - (offset & 0x80 ? 0x100 : 0);
+            W65C02S_TR.new_pc = w65c02s_compute_branch(pc, offset);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(5)
