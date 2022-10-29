@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-22
+            version: 2022-10-29
             please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
 
@@ -857,6 +857,7 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 #define W65C02S_GET_LO(x) ((x) & 0xFF)
 #define W65C02S_SET_HI(x, v) ((x) = ((x) & 0x00FFU) | ((v) << 8))
 #define W65C02S_SET_LO(x, v) ((x) = ((x) & 0xFF00U) | (v))
+
 /* take tr[n] and tr[n + 1] as a 16-bit address. n is always even */
 #define W65C02S_GET_T16(n) (cpu->tr[n] | (cpu->tr[n + 1] << 8))
 
@@ -1739,13 +1740,13 @@ static unsigned w65c02s_mode_zeropage_bit(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             cpu->tr[0] = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->tr[0]);
+            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
         W65C02S_CYCLE(3)
-            cpu->tr[1] = w65c02s_oper_bitset(cpu->oper, cpu->tr[1]);
+            cpu->tr[2] = w65c02s_oper_bitset(cpu->oper, cpu->tr[2]);
             W65C02S_READ(cpu->tr[0]);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[1]);
+            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1800,7 +1801,7 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             cpu->tr[0] = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->tr[0]);
+            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
         W65C02S_CYCLE(3)
         {
             unsigned oper = cpu->oper;
@@ -1811,13 +1812,13 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
                 case W65C02S_OPER_ROL:
                 case W65C02S_OPER_LSR:
                 case W65C02S_OPER_ROR:
-                    cpu->tr[1] = w65c02s_oper_rmw(cpu, oper, cpu->tr[1]);
+                    cpu->tr[2] = w65c02s_oper_rmw(cpu, oper, cpu->tr[2]);
                     break;
                 case W65C02S_OPER_TSB:
-                    cpu->tr[1] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[1], 1);
+                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 1);
                     break;
                 case W65C02S_OPER_TRB:
-                    cpu->tr[1] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[1], 0);
+                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 0);
                     break;
                 default: W65C02S_UNREACHABLE();
             }
@@ -1825,7 +1826,7 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(4)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[1]);
+            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1837,13 +1838,13 @@ static unsigned w65c02s_mode_rmw_zeropage_x(W65C02S_PARAMS_MODE) {
             cpu->tr[0] += cpu->x;
             W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(3)
-            cpu->tr[1] = W65C02S_READ(cpu->tr[0]);
+            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
         W65C02S_CYCLE(4)
             W65C02S_READ(cpu->tr[0]);
-            cpu->tr[1] = w65c02s_oper_rmw(cpu, cpu->oper, cpu->tr[1]);
+            cpu->tr[2] = w65c02s_oper_rmw(cpu, cpu->oper, cpu->tr[2]);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[1]);
+            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1945,17 +1946,17 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
         {
             uint8_t tmp = w65c02s_stack_pull(cpu);
             switch (cpu->oper) {
-                case W65C02S_OPER_PHP:
+                case W65C02S_OPER_PLP:
                     cpu->p = tmp | W65C02S_P_A1 | W65C02S_P_B;
                     w65c02s_irq_update_mask(cpu);
                     break;
-                case W65C02S_OPER_PHA:
+                case W65C02S_OPER_PLA:
                     cpu->a = w65c02s_mark_nz(cpu, tmp);
                     break;
-                case W65C02S_OPER_PHX:
+                case W65C02S_OPER_PLX:
                     cpu->x = w65c02s_mark_nz(cpu, tmp);
                     break;
-                case W65C02S_OPER_PHY:
+                case W65C02S_OPER_PLY:
                     cpu->y = w65c02s_mark_nz(cpu, tmp);
                     break;
                 default: W65C02S_UNREACHABLE();
