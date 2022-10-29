@@ -562,6 +562,83 @@ void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v);
 
 /* +------------------------------------------------------------------------+ */
 /* |                                                                        | */
+/* |                            INTERNAL STRUCTS                            | */
+/* |                                                                        | */
+/* +------------------------------------------------------------------------+ */
+
+
+
+/* temporary values for various addressing modes */
+
+struct w65c02s_temp_ea {
+    uint16_t ea; /* effective address */
+    bool adc_penalty; /* ADC decimal penalty */
+};
+
+struct w65c02s_temp_ea8 {
+    uint8_t ea; /* effective address */
+    bool adc_penalty; /* ADC decimal penalty */
+};
+
+struct w65c02s_temp_ea_page {
+    uint16_t ea; /* effective address */
+    uint16_t ea_wrong; /* wrong effective address (wrong high byte) */
+    bool page_penalty; /* page wrap penalty */
+    bool adc_penalty; /* ADC decimal penalty */
+};
+
+struct w65c02s_temp_ea_zp {
+    uint16_t ea; /* effective address */
+    uint8_t zp; /* zero page address */
+    bool page_penalty; /* page wrap penalty */
+    bool adc_penalty; /* ADC decimal penalty */
+};
+
+struct w65c02s_temp_addr {
+    uint16_t ea; /* effective address */
+};
+
+struct w65c02s_temp_jump {
+    uint16_t ea; /* effective address */
+    uint16_t ta; /* temporary address */
+};
+
+struct w65c02s_temp_branch {
+    uint16_t new_pc; /* new program counter */
+    uint16_t old_pc; /* old program counter */
+    bool penalty; /* page crossing penalty */
+};
+
+struct w65c02s_temp_branch_bit {
+    uint16_t new_pc; /* new program counter */
+    uint16_t old_pc; /* old program counter */
+    uint8_t data; /* data read */
+    bool penalty; /* page crossing penalty */
+};
+
+struct w65c02s_temp_rmw {
+    uint16_t ea; /* effective address */
+    uint8_t data; /* data read/to Write */
+};
+
+struct w65c02s_temp_rmw8 {
+    uint8_t ea; /* effective address */
+    uint8_t data; /* data read/to Write */
+};
+
+struct w65c02s_temp_brk {
+    uint8_t ea; /* effective address */
+    bool is_brk; /* is this BRK? */
+};
+
+struct w65c02s_temp_wai {
+    bool is_stp; /* is this STP? */
+};
+
+
+
+/* +------------------------------------------------------------------------+ */
+/* |                                                                        | */
 /* |                                 STRUCT                                 | */
 /* |                                                                        | */
 /* +------------------------------------------------------------------------+ */
@@ -585,11 +662,22 @@ struct w65c02s_cpu {
     /* currently active interrupts, interrupt mask */
     unsigned int_trig, int_mask;
 
-    /* temporary true/false */
-    bool take;
-
-    /* temporary registers used to store state between cycles. */
-    uint8_t tr[5];
+#if !W65C02S_COARSE
+    union {
+        struct w65c02s_temp_ea ea;
+        struct w65c02s_temp_ea8 ea8;
+        struct w65c02s_temp_ea_page ea_page;
+        struct w65c02s_temp_ea_zp ea_zp;
+        struct w65c02s_temp_addr addr;
+        struct w65c02s_temp_jump jump;
+        struct w65c02s_temp_branch branch;
+        struct w65c02s_temp_branch_bit branch_bit;
+        struct w65c02s_temp_rmw rmw;
+        struct w65c02s_temp_rmw8 rmw8;
+        struct w65c02s_temp_brk brk;
+        struct w65c02s_temp_wai wai;
+    } temp;
+#endif
 
     /* 6502 registers: PC, A, X, Y, S (stack pointer), P (flags). */
     W65C02S_ALIGNAS(2) uint16_t pc;
@@ -756,6 +844,8 @@ struct w65c02s_cpu {
 #define W65C02S_CYCLE_LABEL_X(n)    goto cycle_##n; cycle_##n:
 #define W65C02S_END_INSTRUCTION     W65C02S_CYCLE_END                          \
                                 W65C02S_SKIP_REST;
+#define W65C02S_USE_TR(type)        struct w65c02s_temp_##type tmp_;
+#define W65C02S_TR                  tmp_
 #else /* !W65C02S_COARSE */
 
 #if W65C02S_COARSE_CYCLE_COUNTER
@@ -786,6 +876,9 @@ struct w65c02s_cpu {
                                 }                                              \
                                 W65C02S_UNREACHABLE();                         \
                                 W65C02S_SKIP_REST;
+#define W65C02S_USE_TR(type)        struct w65c02s_temp_##type * const tmp_ =  \
+                                                &cpu->temp.type;
+#define W65C02S_TR                  (*tmp_)
 #endif
 
 #define W65C02S_CYCLE_1                           W65C02S_CYCLE_LABEL_1(1)
@@ -858,9 +951,6 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 #define W65C02S_SET_HI(x, v) ((x) = ((x) & 0x00FFU) | ((v) << 8))
 #define W65C02S_SET_LO(x, v) ((x) = ((x) & 0xFF00U) | (v))
 
-/* take tr[n] and tr[n + 1] as a 16-bit address. n is always even */
-#define W65C02S_GET_T16(n) (cpu->tr[n] | (cpu->tr[n + 1] << 8))
-
 /* returns <>0 if a+b overflows, 0 if not (a, b are uint8_t) */
 #define W65C02S_OVERFLOW8(a, b) (((unsigned)(a) + (unsigned)(b)) >> 8)
 
@@ -874,44 +964,48 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 
 
 
-/* all possible values for cpu->mode        (example opcode, ! = only) */
-#define W65C02S_MODE_IMPLIED                0       /*  CLD, DEC A */
-#define W65C02S_MODE_IMPLIED_X              1       /*  INX */
-#define W65C02S_MODE_IMPLIED_Y              2       /*  INY */
+/* all possible values for cpu->mode            (example opcode, ! = only) */
+#define W65C02S_MODE_IMPLIED                        0       /*  CLD, DEC A */
+#define W65C02S_MODE_IMPLIED_X                      1       /*  INX */
+#define W65C02S_MODE_IMPLIED_Y                      2       /*  INY */
 
-#define W65C02S_MODE_IMMEDIATE              3       /*  LDA # */
-#define W65C02S_MODE_RELATIVE               4       /*  BRA # */
-#define W65C02S_MODE_RELATIVE_BIT           5       /*  BBR0 # */
-#define W65C02S_MODE_ZEROPAGE               6       /*  LDA zp */
-#define W65C02S_MODE_ZEROPAGE_X             7       /*  LDA zp,x */
-#define W65C02S_MODE_ZEROPAGE_Y             8       /*  LDA zp,y */
-#define W65C02S_MODE_ZEROPAGE_BIT           9       /*  RMB0 zp */
-#define W65C02S_MODE_ABSOLUTE               10      /*  LDA abs */
-#define W65C02S_MODE_ABSOLUTE_X             11      /*  LDA abs,x */
-#define W65C02S_MODE_ABSOLUTE_Y             12      /*  LDA abs,y */
-#define W65C02S_MODE_ZEROPAGE_INDIRECT      13      /*  ORA (zp) */
+#define W65C02S_MODE_IMMEDIATE                      3       /*  LDA # */
+#define W65C02S_MODE_RELATIVE                       4       /*  BRA # */
+#define W65C02S_MODE_RELATIVE_BIT                   5       /*  BBR0 # */
+#define W65C02S_MODE_ZEROPAGE                       6       /*  LDA zp */
+#define W65C02S_MODE_ZEROPAGE_X                     7       /*  LDA zp,x */
+#define W65C02S_MODE_ZEROPAGE_Y                     8       /*  LDA zp,y */
+#define W65C02S_MODE_ZEROPAGE_BIT                   9       /*  RMB0 zp */
+#define W65C02S_MODE_ABSOLUTE                       10      /*  LDA abs */
+#define W65C02S_MODE_ABSOLUTE_X                     11      /*  LDA abs,x */
+#define W65C02S_MODE_ABSOLUTE_Y                     12      /*  LDA abs,y */
+#define W65C02S_MODE_ZEROPAGE_INDIRECT              13      /*  ORA (zp) */
 
-#define W65C02S_MODE_ZEROPAGE_INDIRECT_X    14      /*  LDA (zp,x) */
-#define W65C02S_MODE_ZEROPAGE_INDIRECT_Y    15      /*  LDA (zp),y */
-#define W65C02S_MODE_ABSOLUTE_INDIRECT      16      /*! JMP (abs) */
-#define W65C02S_MODE_ABSOLUTE_INDIRECT_X    17      /*! JMP (abs,x) */
-#define W65C02S_MODE_ABSOLUTE_JUMP          18      /*! JMP abs */
+#define W65C02S_MODE_ZEROPAGE_INDIRECT_X            14      /*  LDA (zp,x) */
+#define W65C02S_MODE_ZEROPAGE_INDIRECT_Y            15      /*  LDA (zp),y */
+#define W65C02S_MODE_ABSOLUTE_INDIRECT              16      /*! JMP (abs) */
+#define W65C02S_MODE_ABSOLUTE_INDIRECT_X            17      /*! JMP (abs,x) */
+#define W65C02S_MODE_ABSOLUTE_JUMP                  18      /*! JMP abs */
 
-#define W65C02S_MODE_RMW_ZEROPAGE           19      /*  LSR zp */
-#define W65C02S_MODE_RMW_ZEROPAGE_X         20      /*  LSR zp,x */
-#define W65C02S_MODE_SUBROUTINE             21      /*! JSR abs */
-#define W65C02S_MODE_RETURN_SUB             22      /*! RTS */
-#define W65C02S_MODE_RMW_ABSOLUTE           23      /*  LSR abs */
-#define W65C02S_MODE_RMW_ABSOLUTE_X         24      /*  LSR abs,x */
-#define W65C02S_MODE_NOP_5C                 25      /*! NOP ($5C) */
-#define W65C02S_MODE_INT_WAIT_STOP          26      /*  WAI, STP */
+#define W65C02S_MODE_RMW_ZEROPAGE                   19      /*  LSR zp */
+#define W65C02S_MODE_RMW_ZEROPAGE_X                 20      /*  LSR zp,x */
+#define W65C02S_MODE_SUBROUTINE                     21      /*! JSR abs */
+#define W65C02S_MODE_RETURN_SUB                     22      /*! RTS */
+#define W65C02S_MODE_RMW_ABSOLUTE                   23      /*  LSR abs */
+#define W65C02S_MODE_RMW_ABSOLUTE_X                 24      /*  LSR abs,x */
+#define W65C02S_MODE_NOP_5C                         25      /*! NOP ($5C) */
+#define W65C02S_MODE_INT_WAIT_STOP                  26      /*  WAI, STP */
 
-#define W65C02S_MODE_STACK_PUSH             27      /*  PHA */
-#define W65C02S_MODE_STACK_PULL             28      /*  PLA */
-#define W65C02S_MODE_STACK_BRK              29      /*! BRK # */
-#define W65C02S_MODE_STACK_RTI              30      /*! RTI */
+#define W65C02S_MODE_STACK_PUSH                     27      /*  PHA */
+#define W65C02S_MODE_STACK_PULL                     28      /*  PLA */
+#define W65C02S_MODE_STACK_BRK                      29      /*! BRK # */
+#define W65C02S_MODE_STACK_RTI                      30      /*! RTI */
 
-#define W65C02S_MODE_IMPLIED_1C             31      /*! NOP */
+#define W65C02S_MODE_IMPLIED_1C                     31      /*! NOP */
+
+#define W65C02S_MODE_ABSOLUTE_X_STORE               32      /*  STA abs,x */
+#define W65C02S_MODE_ABSOLUTE_Y_STORE               33      /*! STA abs,y */
+#define W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE      34      /*! STA (zp),y */
 
 /* all possible values for cpu->oper. note that for
    W65C02S_MODE_ZEROPAGE_BIT and W65C02S_MODE_RELATIVE_BIT,
@@ -1287,40 +1381,14 @@ static uint16_t w65c02s_irq_select_vector(struct w65c02s_cpu *cpu) {
 
 
 
-/* false = no store penalty, true = store penalty */
-W65C02S_INLINE bool w65c02s_oper_is_store(unsigned oper) {
-    switch (oper) {
-        case W65C02S_OPER_STA:
-        case W65C02S_OPER_STX:
-        case W65C02S_OPER_STY:
-        case W65C02S_OPER_STZ:
-            return true;
-    }
-    return false;
-}
-
 /* most RMW abs,x instructions can avoid a penalty cycle, but INC, DEC cannot */
-W65C02S_INLINE bool w65c02s_fast_rmw_absx(unsigned oper) {
+W65C02S_INLINE bool w65c02s_slow_rmw_absx(unsigned oper) {
     switch (oper) {
         case W65C02S_OPER_INC:
         case W65C02S_OPER_DEC:
-            return false;
+            return true;
     }
-    return true;
-}
-
-/* computes new branch target in tr, freom where it can be copied to PC. */
-W65C02S_INLINE void w65c02s_compute_branch(struct w65c02s_cpu *cpu) {
-    /* offset in tr[0] */
-    /* old PC in tr[0], tr[1] */
-    /* new PC in tr[2], tr[3] */
-    uint8_t offset = cpu->tr[0];
-    uint16_t pc_old = cpu->pc;
-    uint16_t pc_new = pc_old + offset - (offset & 0x80 ? 0x100 : 0);
-    cpu->tr[0] = W65C02S_GET_LO(pc_old);
-    cpu->tr[1] = W65C02S_GET_HI(pc_old);
-    cpu->tr[2] = W65C02S_GET_LO(pc_new);
-    cpu->tr[3] = W65C02S_GET_HI(pc_new);
+    return false;
 }
 
 /* false = no penalty, true = decimal mode penalty */
@@ -1415,10 +1483,10 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
 #endif
 
 /* the extra cycle done on ADC/SBC if D is set. copies p_adj to p.
-   skipped if cpu->take is false (use the return value of
+   skipped if flag is false (use the return value of
       w65c02s_oper_imm or w65c02s_oper_ea) */
-#define W65C02S_ADC_D_SPURIOUS(ea)                                             \
-    if (!cpu->take) W65C02S_SKIP_REST; /* no penalty cycle => skip last read */\
+#define W65C02S_ADC_D_SPURIOUS(flag, ea)                                       \
+    if (!(flag)) W65C02S_SKIP_REST; /* no penalty cycle => skip last read */   \
     cpu->p = cpu->p_adj;                                                       \
     W65C02S_READ(ea);
     /* no need to update mask - p_adj never changes I */
@@ -1491,320 +1559,388 @@ static unsigned w65c02s_mode_implied_y(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_immediate(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_imm(cpu, W65C02S_READ(cpu->pc++));
+            W65C02S_TR.adc_penalty = w65c02s_oper_imm(cpu,
+                                                W65C02S_READ(cpu->pc++));
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(2)
-            W65C02S_ADC_D_SPURIOUS(cpu->pc);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, cpu->pc);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(2)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, cpu->tr[0]);
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(3)
-            W65C02S_ADC_D_SPURIOUS(cpu->tr[0]);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty,
+                                   W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
-            cpu->tr[0] += cpu->x;
+            W65C02S_TR.ea += cpu->x;
             W65C02S_READ(cpu->pc++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, cpu->tr[0]);
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(cpu->tr[0]);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
-            cpu->tr[0] += cpu->y;
+            W65C02S_TR.ea += cpu->y;
             W65C02S_READ(cpu->pc++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, cpu->tr[0]);
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(cpu->tr[0]);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_absolute(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
+            W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(cpu->pc++));
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
             /* page wrap cycle? */
-            cpu->tr[4] = W65C02S_OVERFLOW8(cpu->tr[0], cpu->x);
-            cpu->tr[0] += cpu->x;
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
-            cpu->take = cpu->tr[4] || w65c02s_oper_is_store(cpu->oper);
-            if (!cpu->take) w65c02s_irq_latch(cpu);
+            W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->x);
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->x;
+            if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
-            /* if we did not cross the page boundary, skip this cycle.
-               store instructions cannot avoid running this cycle, though */
-            if (!cpu->take) W65C02S_SKIP_TO_NEXT(4);
-            W65C02S_READ(!cpu->tr[4] ? W65C02S_GET_T16(0) : cpu->pc - 1);
-            cpu->tr[1] += cpu->tr[4];
+            /* if we did not cross the page boundary, skip this cycle. */
+            if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(4);
+            W65C02S_READ(cpu->pc - 1);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+    W65C02S_END_INSTRUCTION
+}
+
+static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_page)
+    W65C02S_BEGIN_INSTRUCTION
+        W65C02S_CYCLE(1)
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
+        W65C02S_CYCLE(2)
+            W65C02S_TR.ea_wrong = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->x)
+                                    ? W65C02S_TR.ea : cpu->pc;
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->x;
+        W65C02S_CYCLE(3)
+            W65C02S_READ(W65C02S_TR.ea_wrong);
+            w65c02s_irq_latch(cpu);
+        W65C02S_CYCLE(4)
+            /* stores never have penalty cycles */
+            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
             /* page wrap cycle? */
-            cpu->tr[4] = W65C02S_OVERFLOW8(cpu->tr[0], cpu->y);
-            cpu->tr[0] += cpu->y;
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
-            cpu->take = cpu->tr[4] || w65c02s_oper_is_store(cpu->oper);
-            if (!cpu->take) w65c02s_irq_latch(cpu);
+            W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y);
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->y;
+            if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
-            /* if we did not cross the page boundary, skip this cycle.
-               store instructions cannot avoid running this cycle, though */
-            if (!cpu->take) W65C02S_SKIP_TO_NEXT(4);
-            W65C02S_READ(!cpu->tr[4] ? W65C02S_GET_T16(0) : cpu->pc - 1);
-            cpu->tr[1] += cpu->tr[4];
+            /* if we did not cross the page boundary, skip this cycle. */
+            if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(4);
+            W65C02S_READ(cpu->pc - 1);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+    W65C02S_END_INSTRUCTION
+}
+
+static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_page)
+    W65C02S_BEGIN_INSTRUCTION
+        W65C02S_CYCLE(1)
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
+        W65C02S_CYCLE(2)
+            W65C02S_TR.ea_wrong = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y)
+                                    ? W65C02S_TR.ea : cpu->pc;
+            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->y;
+        W65C02S_CYCLE(3)
+            W65C02S_READ(W65C02S_TR.ea_wrong);
+            w65c02s_irq_latch(cpu);
+        W65C02S_CYCLE(4)
+            /* stores never have penalty cycles */
+            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_indirect(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[2] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[0] = W65C02S_READ(cpu->tr[2]++);
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(3)
-            cpu->tr[1] = W65C02S_READ(cpu->tr[2]);
+            W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(W65C02S_TR.zp));
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[2] = W65C02S_READ(cpu->pc);
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc) + cpu->x;
         W65C02S_CYCLE(2)
-            cpu->tr[2] += cpu->x;
             W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(3)
-            cpu->tr[0] = W65C02S_READ(cpu->tr[2]++);
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(4)
-            cpu->tr[1] = W65C02S_READ(cpu->tr[2]++);
+            W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(W65C02S_TR.zp));
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[2] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
-            cpu->tr[0] = W65C02S_READ(cpu->tr[2]++);
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(3)
             /* page wrap cycle? */
-            cpu->tr[4] = W65C02S_OVERFLOW8(cpu->tr[0], cpu->y);
-            cpu->tr[0] += cpu->y;
-            cpu->tr[1] = W65C02S_READ(cpu->tr[2]);
-            cpu->take = cpu->tr[4] || w65c02s_oper_is_store(cpu->oper);
-            if (!cpu->take) w65c02s_irq_latch(cpu);
+            W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y);
+            W65C02S_TR.ea += (W65C02S_READ(W65C02S_TR.zp) << 8) | cpu->y;
+            if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
-            /* if we did not cross the page boundary, skip this cycle.
-               store instructions cannot avoid running this cycle, though */
-            if (!cpu->take) W65C02S_SKIP_TO_NEXT(5);
-            W65C02S_READ(cpu->tr[2]);
-            cpu->tr[1] += cpu->tr[4];
+            /* if we did not cross the page boundary, skip this cycle */
+            if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(5);
+            W65C02S_READ(W65C02S_TR.zp);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            cpu->take = w65c02s_oper_ea(cpu, W65C02S_GET_T16(0));
-            if (cpu->take) w65c02s_irq_latch_slow(cpu);
+            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_GET_T16(0));
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+    W65C02S_END_INSTRUCTION
+}
+
+static unsigned w65c02s_mode_zeropage_indirect_y_store(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(ea_zp)
+    W65C02S_BEGIN_INSTRUCTION
+        W65C02S_CYCLE(1)
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc);
+        W65C02S_CYCLE(2)
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
+        W65C02S_CYCLE(3)
+            W65C02S_TR.ea += (W65C02S_READ(W65C02S_TR.zp) << 8) | cpu->y;
+        W65C02S_CYCLE(4)
+            W65C02S_READ(W65C02S_TR.zp);
+            w65c02s_irq_latch(cpu);
+        W65C02S_CYCLE(5)
+            /* stores never have penalty cycles */
+            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_jump_absolute(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(addr)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc);
-            cpu->pc = W65C02S_GET_T16(0);
+            cpu->pc = (W65C02S_READ(cpu->pc) << 8) | W65C02S_TR.ea;
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_jump_indirect(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(jump)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ta = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc);
+            W65C02S_SET_HI(W65C02S_TR.ta, W65C02S_READ(cpu->pc));
         W65C02S_CYCLE(3)
             W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(4)
-            cpu->tr[2] = W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.ta++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
-            cpu->tr[3] = W65C02S_READ(W65C02S_GET_T16(0) + 1);
-            cpu->pc = W65C02S_GET_T16(2);
+            cpu->pc = (W65C02S_READ(W65C02S_TR.ta) << 8) | W65C02S_TR.ea;
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_jump_indirect_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(jump)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ta = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc);
+            W65C02S_TR.ta += (W65C02S_READ(cpu->pc) << 8) | cpu->x;
         W65C02S_CYCLE(3)
-            /* add X to tr0,1 */
-            cpu->tr[1] += W65C02S_OVERFLOW8(cpu->tr[0], cpu->x);
-            cpu->tr[0] += cpu->x;
             W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(4)
-            cpu->tr[2] = W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.ta++);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
-            cpu->tr[3] = W65C02S_READ(W65C02S_GET_T16(0) + 1);
-            cpu->pc = W65C02S_GET_T16(2);
+            cpu->pc = (W65C02S_READ(W65C02S_TR.ta) << 8) | W65C02S_TR.ea;
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_zeropage_bit(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(3)
-            cpu->tr[2] = w65c02s_oper_bitset(cpu->oper, cpu->tr[2]);
-            W65C02S_READ(cpu->tr[0]);
+            W65C02S_TR.data = w65c02s_oper_bitset(cpu->oper, W65C02S_TR.data);
+            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
+            W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(branch)
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
-            w65c02s_compute_branch(cpu);
+        {
+            uint8_t offset = W65C02S_READ(cpu->pc++);
+            uint16_t pc = cpu->pc;
+            W65C02S_TR.old_pc = pc;
+            W65C02S_TR.new_pc = pc + offset - (offset & 0x80 ? 0x100 : 0);
             w65c02s_irq_latch(cpu);
+        }
         W65C02S_CYCLE(2)
             /* skip the rest of the instruction if branch is not taken */
-            if (!w65c02s_oper_branch(cpu->oper, cpu->p))
-                W65C02S_SKIP_REST;
-            W65C02S_READ(W65C02S_GET_T16(0));
-            cpu->pc = W65C02S_GET_T16(2);
-            if (cpu->tr[1] != cpu->tr[3]) w65c02s_irq_latch(cpu);
+            if (!w65c02s_oper_branch(cpu->oper, cpu->p)) W65C02S_SKIP_REST;
+            W65C02S_READ(W65C02S_TR.old_pc);
+            cpu->pc = W65C02S_TR.new_pc;
+            W65C02S_TR.penalty = W65C02S_GET_HI(W65C02S_TR.old_pc)
+                              != W65C02S_GET_HI(W65C02S_TR.new_pc);
+            if (W65C02S_TR.penalty) w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* skip the rest of the instruction if no page boundary crossed */
-            if (cpu->tr[1] == cpu->tr[3]) W65C02S_SKIP_REST;
-            W65C02S_READ(W65C02S_GET_T16(0));
+            if (!W65C02S_TR.penalty) W65C02S_SKIP_REST;
+            W65C02S_READ(W65C02S_TR.old_pc);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(branch_bit)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[3] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.new_pc = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            W65C02S_READ(cpu->tr[3]);
+            W65C02S_READ(W65C02S_TR.new_pc);
         W65C02S_CYCLE(3)
-            cpu->tr[4] = W65C02S_READ(cpu->tr[3]);
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.new_pc);
         W65C02S_CYCLE(4)
-            cpu->take = w65c02s_oper_bitbranch(cpu->oper, cpu->tr[4]);
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
-            w65c02s_compute_branch(cpu);
+        {
+            uint8_t offset = W65C02S_READ(cpu->pc++);
+            uint16_t pc = cpu->pc;
+            W65C02S_TR.old_pc = pc;
+            W65C02S_TR.new_pc = pc + offset - (offset & 0x80 ? 0x100 : 0);
+            w65c02s_irq_latch(cpu);
+        }
         W65C02S_CYCLE(5)
             /* skip the rest of the instruction if branch is not taken */
-            if (!cpu->take) W65C02S_SKIP_REST;
-            W65C02S_READ(W65C02S_GET_T16(0));
-            cpu->pc = W65C02S_GET_T16(2);
-            if (cpu->tr[1] != cpu->tr[3]) w65c02s_irq_latch(cpu);
+            if (!w65c02s_oper_bitbranch(cpu->oper, W65C02S_TR.data))
+                W65C02S_SKIP_REST;
+            W65C02S_READ(W65C02S_TR.old_pc);
+            cpu->pc = W65C02S_TR.new_pc;
+            W65C02S_TR.penalty = W65C02S_GET_HI(W65C02S_TR.old_pc)
+                              != W65C02S_GET_HI(W65C02S_TR.new_pc);
+            if (W65C02S_TR.penalty) w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(6)
             /* skip the rest of the instruction if no page boundary crossed */
-            if (cpu->tr[1] == cpu->tr[3]) W65C02S_SKIP_REST;
-            W65C02S_READ(W65C02S_GET_T16(0));
+            if (!W65C02S_TR.penalty) W65C02S_SKIP_REST;
+            W65C02S_READ(W65C02S_TR.old_pc);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(3)
         {
             unsigned oper = cpu->oper;
+            uint8_t data = W65C02S_TR.data;
             switch (oper) {
                 case W65C02S_OPER_DEC:
                 case W65C02S_OPER_INC:
@@ -1812,53 +1948,56 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
                 case W65C02S_OPER_ROL:
                 case W65C02S_OPER_LSR:
                 case W65C02S_OPER_ROR:
-                    cpu->tr[2] = w65c02s_oper_rmw(cpu, oper, cpu->tr[2]);
+                    data = w65c02s_oper_rmw(cpu, oper, data);
                     break;
                 case W65C02S_OPER_TSB:
-                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 1);
+                    data = w65c02s_oper_tsb(cpu, cpu->a, data, 1);
                     break;
                 case W65C02S_OPER_TRB:
-                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 0);
+                    data = w65c02s_oper_tsb(cpu, cpu->a, data, 0);
                     break;
                 default: W65C02S_UNREACHABLE();
             }
-            W65C02S_READ(cpu->tr[0]);
+            W65C02S_TR.data = data;
+            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(4)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
+            W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_rmw_zeropage_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(rmw8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc) + cpu->x;
         W65C02S_CYCLE(2)
-            cpu->tr[0] += cpu->x;
             W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(3)
-            cpu->tr[2] = W65C02S_READ(cpu->tr[0]);
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(4)
-            W65C02S_READ(cpu->tr[0]);
-            cpu->tr[2] = w65c02s_oper_rmw(cpu, cpu->oper, cpu->tr[2]);
+            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
+            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_WRITE(cpu->tr[0], cpu->tr[2]);
+            W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
+            W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(cpu->pc++));
         W65C02S_CYCLE(3)
-            cpu->tr[2] = W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(4)
         {
             unsigned oper = cpu->oper;
+            uint8_t data = W65C02S_TR.data;
             switch (oper) {
                 case W65C02S_OPER_DEC:
                 case W65C02S_OPER_INC:
@@ -1866,49 +2005,49 @@ static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
                 case W65C02S_OPER_ROL:
                 case W65C02S_OPER_LSR:
                 case W65C02S_OPER_ROR:
-                    cpu->tr[2] = w65c02s_oper_rmw(cpu, oper, cpu->tr[2]);
+                    data = w65c02s_oper_rmw(cpu, oper, data);
                     break;
                 case W65C02S_OPER_TSB:
-                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 1);
+                    data = w65c02s_oper_tsb(cpu, cpu->a, data, 1);
                     break;
                 case W65C02S_OPER_TRB:
-                    cpu->tr[2] = w65c02s_oper_tsb(cpu, cpu->a, cpu->tr[2], 0);
+                    data = w65c02s_oper_tsb(cpu, cpu->a, data, 0);
                     break;
                 default: W65C02S_UNREACHABLE();
             }
-            W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_TR.data = data;
+            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(5)
-            W65C02S_WRITE(W65C02S_GET_T16(0), cpu->tr[2]);
+            W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
+            W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(cpu->pc++));
         W65C02S_CYCLE(3)
         {
-            unsigned overflow;
-            overflow = W65C02S_OVERFLOW8(cpu->tr[0], cpu->x);
-            cpu->tr[0] += cpu->x;
+            bool penalty = w65c02s_slow_rmw_absx(cpu->oper) ||
+                    W65C02S_OVERFLOW8(cpu->x, W65C02S_GET_LO(W65C02S_TR.ea));
+            W65C02S_TR.ea += cpu->x;
             /* if not INC and DEC and we did not cross a page, skip cycle. */
-            if (!overflow && w65c02s_fast_rmw_absx(cpu->oper))
-                W65C02S_SKIP_TO_NEXT(4);
-            cpu->tr[1] += (uint8_t)overflow;
-            W65C02S_READ(W65C02S_GET_T16(0));
+            if (!penalty) W65C02S_SKIP_TO_NEXT(4);
+            W65C02S_READ(W65C02S_TR.ea);
         }
         W65C02S_CYCLE(4)
-            cpu->tr[2] = W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(5)
-            W65C02S_READ(W65C02S_GET_T16(0));
-            cpu->tr[3] = w65c02s_oper_rmw(cpu, cpu->oper, cpu->tr[2]);
+            W65C02S_READ(W65C02S_TR.ea);
+            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_WRITE(W65C02S_GET_T16(0), cpu->tr[3]);
+            W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1966,10 +2105,11 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_subroutine(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(addr)
     /* op = JSR abs */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
             W65C02S_READ(W65C02S_STACK_ADDR(cpu->s));
         W65C02S_CYCLE(3)
@@ -1978,8 +2118,7 @@ static unsigned w65c02s_mode_subroutine(W65C02S_PARAMS_MODE) {
             w65c02s_stack_push(cpu, W65C02S_GET_LO(cpu->pc));
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
-            cpu->tr[1] = W65C02S_READ(cpu->pc);
-            cpu->pc = W65C02S_GET_T16(0);
+            cpu->pc = (W65C02S_READ(cpu->pc) << 8) | W65C02S_TR.ea;
     W65C02S_END_INSTRUCTION
 }
 
@@ -2019,14 +2158,15 @@ static unsigned w65c02s_mode_stack_rti(W65C02S_PARAMS_MODE) {
 }
 
 static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(brk)
     /* op = BRK (possibly via NMI, IRQ or RESET) */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
         {
             uint8_t tmp = W65C02S_READ(cpu->pc);
             /* is this instruction a true BRK or a hardware interrupt? */
-            cpu->take = !(cpu->in_nmi || cpu->in_irq || cpu->in_rst);
-            if (cpu->take) {
+            W65C02S_TR.is_brk = !(cpu->in_nmi || cpu->in_irq || cpu->in_rst);
+            if (W65C02S_TR.is_brk) {
                 ++cpu->pc;
 #if W65C02S_HOOK_BRK
                 if (cpu->hook_brk && (*cpu->hook_brk)(tmp)) W65C02S_SKIP_REST;
@@ -2045,7 +2185,7 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
             if (cpu->in_rst) W65C02S_READ(W65C02S_STACK_ADDR(cpu->s--));
             else { /* B flag: 0 for NMI/IRQ, 1 for BRK */
                 uint8_t p = cpu->p | W65C02S_P_A1;
-                if (cpu->take)
+                if (W65C02S_TR.is_brk)
                     p |= W65C02S_P_B;
                 else
                     p &= ~W65C02S_P_B;
@@ -2065,36 +2205,32 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
                 cpu->in_irq = false;
                 cpu->in_nmi = true;
             }
-            {
-                uint16_t vec = w65c02s_irq_select_vector(cpu);
-                cpu->tr[0] = W65C02S_GET_LO(vec);
-                cpu->tr[1] = W65C02S_GET_HI(vec);
-            }
-            W65C02S_SET_LO(cpu->pc, W65C02S_READ(W65C02S_GET_T16(0)));
+            W65C02S_TR.ea = w65c02s_irq_select_vector(cpu);
+            W65C02S_SET_LO(cpu->pc, W65C02S_READ(W65C02S_TR.ea++));
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_SET_HI(cpu->pc, W65C02S_READ(W65C02S_GET_T16(0) + 1));
+            W65C02S_SET_HI(cpu->pc, W65C02S_READ(W65C02S_TR.ea));
         W65C02S_CYCLE(7)
             /* end instantly! this is a "ghost" cycle in a way. */
             /* HW interrupts do not increment the instruction counter */
 #if !W65C02S_COARSE
             cpu->cycl = 0;
 #endif
-            if (!cpu->take) --cpu->total_instructions;
+            if (!W65C02S_TR.is_brk) --cpu->total_instructions;
             W65C02S_SKIP_REST;
     W65C02S_END_INSTRUCTION
 }
 
 static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(addr)
     /* op = NOP $5C, which behaves oddly */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            cpu->tr[0] = W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            cpu->tr[1] = W65C02S_READ(cpu->pc++);
+            W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(3)
-            cpu->tr[1] = (uint8_t)-1;
-            W65C02S_READ(W65C02S_GET_T16(0));
+            W65C02S_READ(0xFF00U | W65C02S_TR.ea);
         W65C02S_CYCLE(4)
             W65C02S_READ(0xFFFFU);
         W65C02S_CYCLE(5)
@@ -2108,21 +2244,22 @@ static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
+    W65C02S_USE_TR(wai)
     /* op = WAI/STP */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
             W65C02S_READ(cpu->pc);
             /* STP (1) or WAI (0) */
-            cpu->take = cpu->oper != W65C02S_OPER_WAI;
+            W65C02S_TR.is_stp = cpu->oper != W65C02S_OPER_WAI;
 #if W65C02S_HOOK_STP
-            if (cpu->take && cpu->hook_stp && (*cpu->hook_stp)())
+            if (W65C02S_TR.is_stp && cpu->hook_stp && (*cpu->hook_stp)())
                 W65C02S_SKIP_REST;
 #endif
         W65C02S_CYCLE(2)
             W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(3)
             W65C02S_READ(cpu->pc);
-            if (cpu->take) {
+            if (W65C02S_TR.is_stp) {
                 W65C02S_CPU_STATE_INSERT(cpu->cpu_state,
                                          W65C02S_CPU_STATE_STOP);
             /* don't enter WAI if *any* interrupts are lined up */
@@ -2201,6 +2338,12 @@ static unsigned w65c02s_run_mode(struct w65c02s_cpu *cpu, bool cont)
     case W65C02S_MODE_ZEROPAGE_BIT:        W65C02S_GO_MODE(zeropage_bit);
     case W65C02S_MODE_INT_WAIT_STOP:       W65C02S_GO_MODE(int_wait_stop);
     case W65C02S_MODE_NOP_5C:              W65C02S_GO_MODE(nop_5c);
+    case W65C02S_MODE_ABSOLUTE_X_STORE:
+        W65C02S_GO_MODE(absolute_x_store);
+    case W65C02S_MODE_ABSOLUTE_Y_STORE:
+        W65C02S_GO_MODE(absolute_y_store);
+    case W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE:
+        W65C02S_GO_MODE(zeropage_indirect_y_store);
     }
     W65C02S_UNREACHABLE();
     return 0;
@@ -2308,14 +2451,14 @@ W65C02S_ALIGNAS(256) static const W65C02S_LOOKUP_TYPE w65c02s_modes[256] = {
     W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
     W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
     W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
+    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE, 
     W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
     W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
     W65C02S_MODE_ZEROPAGE_Y,          W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
+    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y_STORE,          
     W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_ABSOLUTE_X,          W65C02S_MODE_RELATIVE_BIT,        
+    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE_X_STORE,          
+    W65C02S_MODE_ABSOLUTE_X_STORE,    W65C02S_MODE_RELATIVE_BIT,        
     W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
     W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
     W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
