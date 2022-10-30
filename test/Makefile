@@ -39,16 +39,16 @@ all: $(PROGS)
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) $(CEFLAGS) -I$(LIBPATH) -c -o $@ $<
 
-monitor: $(LIBFILES) monitor.o
+monitor: $(LIBFILES) monitor.o $(HEADERS)
 	$(LD) -o $@ $^ $(LFLAGS)
 
-busdump: $(LIBFILES) busdump.o
+busdump: $(LIBFILES) busdump.o $(HEADERS)
 	$(LD) -o $@ $^ $(LFLAGS)
 
-benchmark: $(LIBFILES) benchmark.o
+benchmark: $(LIBFILES) benchmark.o $(HEADERS)
 	$(LD) -o $@ $^ $(LFLAGS)
 
-breaktest: $(LIBFILES) breaktest.o
+breaktest: $(LIBFILES) breaktest.o $(HEADERS)
 	$(LD) -o $@ $^ $(LFLAGS)
 
 clean:

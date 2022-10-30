@@ -1946,7 +1946,7 @@ static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
             /* skip one read cycle if no page boundary crossed */
             if (W65C02S_GET_HI(cpu->pc = W65C02S_TR.new_pc)
                        == W65C02S_GET_HI(W65C02S_TR.old_pc))
-                W65C02S_SKIP_TO_NEXT(3);
+                W65C02S_SKIP_TO_NEXT(6);
             W65C02S_READ(W65C02S_TR.old_pc);
             w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
@@ -2062,7 +2062,7 @@ static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
             W65C02S_TR.ea += cpu->x;
             /* if not INC and DEC and we did not cross a page, skip cycle. */
             if (!penalty) W65C02S_SKIP_TO_NEXT(4);
-            W65C02S_READ(cpu->pc - 1);
+            W65C02S_READ(W65C02S_TR.ea);
         }
         W65C02S_CYCLE(4)
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
