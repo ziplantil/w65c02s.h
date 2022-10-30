@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-29
+            version: 2022-10-30
 
             busdump.c - bus dump program
 *******************************************************************************/
@@ -36,6 +36,19 @@ void w65c02s_write(uint16_t a, uint8_t v) {
 
 uint16_t vector = 0;
 
+struct measurement {
+    double t;
+};
+
+void measurement_reset(struct measurement *m) {
+    m->t = (double)clock() / CLOCKS_PER_SEC;
+}
+
+double measurement_sample(struct measurement *m) {
+    double t1 = (double)clock() / CLOCKS_PER_SEC;
+    return t1 - m->t;
+}
+
 static size_t loadmemfromfile(const char *filename) {
     FILE *file = fopen(filename, "rb");
     size_t size = 0;
@@ -51,7 +64,6 @@ static size_t loadmemfromfile(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    double start, end;
     const int tries = 10;
     int i;
 
@@ -80,23 +92,25 @@ int main(int argc, char *argv[]) {
     
     for (i = 0; i < tries; ++i) {
         unsigned long cycles_run;
+        struct measurement measure;
+        double duration;
 
         w65c02s_reset(&cpu);
         /* RESET cycles */
         w65c02s_run_instructions(&cpu, 1, false);
         cpu.pc = vector;
         
-        start = (double)clock() * 1000 / CLOCKS_PER_SEC;
+        measurement_reset(&measure);
 #if INSTRS
         cycles_run = w65c02s_run_instructions(&cpu, cycles, false);
 #else
         cycles_run = w65c02s_run_cycles(&cpu, cycles);
 #endif        
-        end = (double)clock() * 1000 / CLOCKS_PER_SEC;
+        duration = measurement_sample(&measure) * 1000;
 #if __STDC_VERSION__ >= 199901L
-        printf("%lf ms (%ld cyc)\n", end - start, cycles_run);
+        printf("%lf ms (%ld cyc)\n", duration, cycles_run);
 #else
-        printf("%f ms (%ld cyc)\n", end - start, cycles_run);
+        printf("%f ms (%ld cyc)\n", duration, cycles_run);
 #endif
     }
 

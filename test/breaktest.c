@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-29
+            version: 2022-10-30
 
             breaktest.c - w65c02s_break test program
 *******************************************************************************/

@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-29
+            version: 2022-10-30
             please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
 
@@ -606,14 +606,14 @@ struct w65c02s_temp_jump {
 struct w65c02s_temp_branch {
     uint16_t new_pc; /* new program counter */
     uint16_t old_pc; /* old program counter */
-    bool penalty; /* page crossing penalty */
+    bool penalty; /* branch taken / page crossing penalty */
 };
 
 struct w65c02s_temp_branch_bit {
     uint16_t new_pc; /* new program counter */
     uint16_t old_pc; /* old program counter */
     uint8_t data; /* data read */
-    bool penalty; /* page crossing penalty */
+    bool penalty; /* branch taken / page crossing penalty */
 };
 
 struct w65c02s_temp_rmw {
@@ -834,9 +834,10 @@ struct w65c02s_cpu {
 #define W65C02S_CYCLE_TOTAL_INC     ++cpu->total_cycles;
 #endif
 
-/* end the instruction immediately */
+/* end the instruction immediately. before a read/write! */
 #define W65C02S_SKIP_REST           return cyc
-/* skip to the next cycle n, which should always be the next cycle */
+/* skip to the next cycle n, which should always be the next cycle.
+   must happen before a read/write! */
 #define W65C02S_SKIP_TO_NEXT(n)     goto cycle_##n;
 #define W65C02S_BEGIN_INSTRUCTION   unsigned cyc = 1;
 #define W65C02S_CYCLE_END           ++cyc; W65C02S_CYCLE_TOTAL_INC
@@ -844,6 +845,11 @@ struct w65c02s_cpu {
 #define W65C02S_CYCLE_LABEL_X(n)    goto cycle_##n; cycle_##n:
 #define W65C02S_END_INSTRUCTION     W65C02S_CYCLE_END                          \
                                 W65C02S_SKIP_REST;
+/* skip the rest of the instruction *after* a read/write. */
+#define W65C02S_SKIP_REST_AFTER     do {                                       \
+                                        W65C02S_CYCLE_END;                     \
+                                        return cyc;                            \
+                                    } while (0)
 #define W65C02S_USE_TR(type)        struct w65c02s_temp_##type tmp_;
 #define W65C02S_TR                  tmp_
 #else /* !W65C02S_COARSE */
@@ -854,13 +860,16 @@ struct w65c02s_cpu {
 #define W65C02S_CYCLE_CONDITION     ++cpu->total_cycles == cpu->target_cycles
 #endif
 
-/* end the instruction immediately */
+/* end the instruction immediately. before a read/write! */
 #define W65C02S_SKIP_REST           return 0
 /* skip to the next cycle n, which should always be the next cycle
    we have to increment cpu->cycl here, otherwise we might continue on the
-   wrong cycle */
+   wrong cycle. must happen before a read/write! */
 #define W65C02S_SKIP_TO_NEXT(n)     do { ++cpu->cycl; goto cycle_##n; }        \
                                                             while (0)
+/* skips must happen before a read/write on that cycle, except for this: */
+/* the skip that takes effect after a read/write. */
+#define W65C02S_SKIP_POST_ACCESS    return 0
 #define W65C02S_BEGIN_INSTRUCTION   if (W65C02S_LIKELY(!cont))                 \
                                         goto cycle_1;                          \
                                     switch (cpu->cycl) {
@@ -876,6 +885,11 @@ struct w65c02s_cpu {
                                 }                                              \
                                 W65C02S_UNREACHABLE();                         \
                                 W65C02S_SKIP_REST;
+/* skip the rest of the instruction *after* a read/write. */
+#define W65C02S_SKIP_REST_AFTER     do {                                       \
+                                        W65C02S_CYCLE_END_LAST;                \
+                                        return 0;                              \
+                                    } while (0)
 #define W65C02S_USE_TR(type)        struct w65c02s_temp_##type * const tmp_ =  \
                                                 &cpu->temp.type;
 #define W65C02S_TR                  (*tmp_)
@@ -1587,8 +1601,7 @@ static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
             W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
             if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(3)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty,
-                                   W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1679,7 +1692,7 @@ static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
             bool page_crossed;
             W65C02S_TR.ea += cpu->x;
             page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8);
+            W65C02S_TR.ea += W65C02S_READ(cpu->pc++) << 8;
             W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
         }
         W65C02S_CYCLE(3)
@@ -1725,7 +1738,7 @@ static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
             bool page_crossed;
             W65C02S_TR.ea += cpu->y;
             page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8);
+            W65C02S_TR.ea += W65C02S_READ(cpu->pc++) << 8;
             W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
         }
         W65C02S_CYCLE(3)
@@ -1888,23 +1901,22 @@ static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
         {
+            /* note the post-increment of PC here! */
             uint8_t offset = W65C02S_READ(cpu->pc++);
-            uint16_t pc = cpu->pc;
-            W65C02S_TR.old_pc = pc;
-            W65C02S_TR.new_pc = w65c02s_compute_branch(pc, offset);
-            w65c02s_irq_latch(cpu);
+            /* copy PC to old_pc and compute new_pc with offset */
+            W65C02S_TR.new_pc = w65c02s_compute_branch(
+                        W65C02S_TR.old_pc = cpu->pc, offset);
         }
         W65C02S_CYCLE(2)
             /* skip the rest of the instruction if branch is not taken */
             if (!w65c02s_oper_branch(cpu->oper, cpu->p)) W65C02S_SKIP_REST;
+            /* skip one read cycle if no page boundary crossed */
+            if (W65C02S_GET_HI(cpu->pc = W65C02S_TR.new_pc)
+                       == W65C02S_GET_HI(W65C02S_TR.old_pc))
+                W65C02S_SKIP_TO_NEXT(3);
             W65C02S_READ(W65C02S_TR.old_pc);
-            cpu->pc = W65C02S_TR.new_pc;
-            W65C02S_TR.penalty = W65C02S_GET_HI(W65C02S_TR.old_pc)
-                              != W65C02S_GET_HI(W65C02S_TR.new_pc);
-            if (W65C02S_TR.penalty) w65c02s_irq_latch(cpu);
+            w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(3)
-            /* skip the rest of the instruction if no page boundary crossed */
-            if (!W65C02S_TR.penalty) W65C02S_SKIP_REST;
             W65C02S_READ(W65C02S_TR.old_pc);
     W65C02S_END_INSTRUCTION
 }
@@ -1920,24 +1932,24 @@ static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.new_pc);
         W65C02S_CYCLE(4)
         {
+            /* note the post-increment of PC here! */
             uint8_t offset = W65C02S_READ(cpu->pc++);
-            uint16_t pc = cpu->pc;
-            W65C02S_TR.old_pc = pc;
-            W65C02S_TR.new_pc = w65c02s_compute_branch(pc, offset);
+            /* copy PC to old_pc and compute new_pc with offset */
+            W65C02S_TR.new_pc = w65c02s_compute_branch(
+                        W65C02S_TR.old_pc = cpu->pc, offset);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(5)
             /* skip the rest of the instruction if branch is not taken */
             if (!w65c02s_oper_bitbranch(cpu->oper, W65C02S_TR.data))
                 W65C02S_SKIP_REST;
+            /* skip one read cycle if no page boundary crossed */
+            if (W65C02S_GET_HI(cpu->pc = W65C02S_TR.new_pc)
+                       == W65C02S_GET_HI(W65C02S_TR.old_pc))
+                W65C02S_SKIP_TO_NEXT(3);
             W65C02S_READ(W65C02S_TR.old_pc);
-            cpu->pc = W65C02S_TR.new_pc;
-            W65C02S_TR.penalty = W65C02S_GET_HI(W65C02S_TR.old_pc)
-                              != W65C02S_GET_HI(W65C02S_TR.new_pc);
-            if (W65C02S_TR.penalty) w65c02s_irq_latch(cpu);
+            w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
-            /* skip the rest of the instruction if no page boundary crossed */
-            if (!W65C02S_TR.penalty) W65C02S_SKIP_REST;
             W65C02S_READ(W65C02S_TR.old_pc);
     W65C02S_END_INSTRUCTION
 }
@@ -2050,7 +2062,7 @@ static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
             W65C02S_TR.ea += cpu->x;
             /* if not INC and DEC and we did not cross a page, skip cycle. */
             if (!penalty) W65C02S_SKIP_TO_NEXT(4);
-            W65C02S_READ(W65C02S_TR.ea);
+            W65C02S_READ(cpu->pc - 1);
         }
         W65C02S_CYCLE(4)
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
@@ -2826,12 +2838,7 @@ static unsigned long w65c02s_execute_ic(struct w65c02s_cpu *cpu) {
 
 #endif /* W65C02S_COARSE */
 
-#if W65C02S_COARSE
-W65C02S_INLINE unsigned long w65c02s_execute_ii
-#else
-static unsigned long w65c02s_execute_i
-#endif /* W65C02S_COARSE */
-                                      (struct w65c02s_cpu *cpu) {
+W65C02S_INLINE unsigned long w65c02s_execute_ii(struct w65c02s_cpu *cpu) {
     unsigned cycles;
     if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN)) {
         if (w65c02s_handle_break(cpu)) return 0;
@@ -2855,6 +2862,10 @@ decoded:
     return cycles;
 }
 
+static unsigned long w65c02s_execute_i(struct w65c02s_cpu *cpu) {
+    return w65c02s_execute_ii(cpu);
+}
+
 #if W65C02S_COARSE
 
 static unsigned long w65c02s_execute_ix(struct w65c02s_cpu *cpu,
@@ -2870,14 +2881,10 @@ static unsigned long w65c02s_execute_ix(struct w65c02s_cpu *cpu,
     return c;
 }
 
-static unsigned long w65c02s_execute_i(struct w65c02s_cpu *cpu) {
-    return w65c02s_execute_ii(cpu);
-}
-
 #endif /* W65C02S_COARSE */
 
-W65C02S_INLINE unsigned long w65c02s_execute_im(struct w65c02s_cpu *cpu,
-                                                unsigned long instructions) {
+static unsigned long w65c02s_execute_im(struct w65c02s_cpu *cpu,
+                                        unsigned long instructions) {
     unsigned long c = 0;
     while (instructions--) {
 #if W65C02S_COARSE
