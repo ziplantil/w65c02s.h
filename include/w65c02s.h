@@ -572,26 +572,22 @@ void w65c02s_reg_set_pc(struct w65c02s_cpu *cpu, uint16_t v);
 
 struct w65c02s_temp_ea {
     uint16_t ea; /* effective address */
-    bool adc_penalty; /* ADC decimal penalty */
 };
 
 struct w65c02s_temp_ea8 {
     uint8_t ea; /* effective address */
-    bool adc_penalty; /* ADC decimal penalty */
 };
 
 struct w65c02s_temp_ea_page {
     uint16_t ea; /* effective address */
     uint16_t ea_wrong; /* wrong effective address (wrong high byte) */
     bool page_penalty; /* page wrap penalty */
-    bool adc_penalty; /* ADC decimal penalty */
 };
 
 struct w65c02s_temp_ea_zp {
     uint16_t ea; /* effective address */
     uint8_t zp; /* zero page address */
     bool page_penalty; /* page wrap penalty */
-    bool adc_penalty; /* ADC decimal penalty */
 };
 
 struct w65c02s_temp_addr {
@@ -1503,8 +1499,7 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
 /* the extra cycle done on ADC/SBC if D is set. copies p_adj to p.
    skipped if flag is false (use the return value of
       w65c02s_oper_imm or w65c02s_oper_ea) */
-#define W65C02S_ADC_D_SPURIOUS(flag, ea)                                       \
-    if (!(flag)) W65C02S_SKIP_REST; /* no penalty cycle => skip last read */   \
+#define W65C02S_ADC_D_SPURIOUS(ea)                                             \
     cpu->p = cpu->p_adj;                                                       \
     W65C02S_READ(ea);
     /* no need to update mask - p_adj never changes I */
@@ -1577,16 +1572,15 @@ static unsigned w65c02s_mode_implied_y(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_immediate(W65C02S_PARAMS_MODE) {
-    W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_imm(cpu,
-                                                W65C02S_READ(cpu->pc++));
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_imm(cpu, W65C02S_READ(cpu->pc++))))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(2)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, cpu->pc);
+            W65C02S_ADC_D_SPURIOUS(cpu->pc);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1598,10 +1592,11 @@ static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(2)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(3)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1616,10 +1611,11 @@ static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1634,10 +1630,11 @@ static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1651,10 +1648,11 @@ static unsigned w65c02s_mode_absolute(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1675,10 +1673,11 @@ static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1721,10 +1720,11 @@ static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1762,10 +1762,11 @@ static unsigned w65c02s_mode_zeropage_indirect(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1783,10 +1784,11 @@ static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
@@ -1809,10 +1811,11 @@ static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            W65C02S_TR.adc_penalty = w65c02s_oper_ea(cpu, W65C02S_TR.ea);
-            if (W65C02S_TR.adc_penalty) w65c02s_irq_latch_slow(cpu);
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+                W65C02S_SKIP_REST_AFTER; /* no penalty. */
+            else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
-            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.adc_penalty, W65C02S_TR.ea);
+            W65C02S_ADC_D_SPURIOUS(W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
