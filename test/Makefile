@@ -26,10 +26,6 @@ ifdef COARSE
 CEFLAGS:=$(CEFLAGS) -DW65C02S_COARSE=1
 endif
 
-ifdef COARSE_CYCLE_COUNTER
-CEFLAGS:=$(CEFLAGS) -DW65C02S_COARSE_CYCLE_COUNTER=1
-endif
-
 PROGS=monitor busdump benchmark breaktest
 
 .PHONY: all clean

@@ -23,12 +23,6 @@ extern "C" {
 #define W65C02S_COARSE 0
 #endif
 
-/* 1: cycle counter is updated only at the end of an execution loop */
-/* 0: cycle counter is accurate even in callbacks */
-#ifndef W65C02S_COARSE_CYCLE_COUNTER
-#define W65C02S_COARSE_CYCLE_COUNTER 0
-#endif
-
 /* 1: define uint8_t w65c02s_read(uint16_t); 
          and    void w65c02s_write(uint16_t, uint8_t); through linking. */
 /* 0: define them through function pointers passed to w65c02s_init. */
@@ -224,10 +218,6 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
 /** w65c02s_get_cycle_count
  *
  *  Gets the total number of cycles executed by this CPU.
- *
- *  If the library has been compiled with W65C02S_COARSE_CYCLE_COUNTER,
- *  this value might not be updated between calls to `w65c02s_run_cycles`
- *  or `w65c02s_run_instructions`.
  *
  *  If it hasn't, the value returned by this function reflects how many
  *  cycles have been run. For example, on the first reset cycle (spurious
@@ -590,10 +580,6 @@ struct w65c02s_temp_ea_zp {
     bool page_penalty; /* page wrap penalty */
 };
 
-struct w65c02s_temp_addr {
-    uint16_t ea; /* effective address */
-};
-
 struct w65c02s_temp_jump {
     uint16_t ea; /* effective address */
     uint16_t ta; /* temporary address */
@@ -602,14 +588,14 @@ struct w65c02s_temp_jump {
 struct w65c02s_temp_branch {
     uint16_t new_pc; /* new program counter */
     uint16_t old_pc; /* old program counter */
-    bool penalty; /* branch taken / page crossing penalty */
+    bool penalty; /* page crossing penalty */
 };
 
 struct w65c02s_temp_branch_bit {
     uint16_t new_pc; /* new program counter */
     uint16_t old_pc; /* old program counter */
     uint8_t data; /* data read */
-    bool penalty; /* branch taken / page crossing penalty */
+    bool penalty; /* page crossing penalty */
 };
 
 struct w65c02s_temp_rmw {
@@ -643,20 +629,19 @@ struct w65c02s_temp_wai {
 
 /* please treat w65c02s_cpu as an opaque type */
 struct w65c02s_cpu {
-#if !W65C02S_COARSE_CYCLE_COUNTER
     unsigned long total_cycles;
-#endif
 #if !W65C02S_COARSE
-#if W65C02S_COARSE_CYCLE_COUNTER
-    unsigned long left_cycles;
-#else
     unsigned long target_cycles;
-#endif
 #endif
     /* run/wait/stop, interrupt trigger flags (see W65C02S_CPU_STATE_)... */
     unsigned cpu_state;
     /* currently active interrupts, interrupt mask */
     unsigned int_trig, int_mask;
+
+    /* 6502 registers: PC, A, X, Y, S (stack pointer), P (flags). */
+    W65C02S_ALIGNAS(2) uint16_t pc;
+    uint8_t a, x, y, s, p, p_adj;
+    /* p_adj for decimal mode; it contains the "correct" flags. */
 
 #if !W65C02S_COARSE
     union {
@@ -664,7 +649,6 @@ struct w65c02s_cpu {
         struct w65c02s_temp_ea8 ea8;
         struct w65c02s_temp_ea_page ea_page;
         struct w65c02s_temp_ea_zp ea_zp;
-        struct w65c02s_temp_addr addr;
         struct w65c02s_temp_jump jump;
         struct w65c02s_temp_branch branch;
         struct w65c02s_temp_branch_bit branch_bit;
@@ -675,11 +659,6 @@ struct w65c02s_cpu {
     } temp;
 #endif
 
-    /* 6502 registers: PC, A, X, Y, S (stack pointer), P (flags). */
-    W65C02S_ALIGNAS(2) uint16_t pc;
-    uint8_t a, x, y, s, p, p_adj;
-    /* p_adj for decimal mode; it contains the "correct" flags. */
-
     /* addressing mode, operation */
     unsigned int mode, oper;
 #if !W65C02S_COARSE
@@ -688,9 +667,6 @@ struct w65c02s_cpu {
 #endif
 
     unsigned long total_instructions;
-#if W65C02S_COARSE_CYCLE_COUNTER
-    unsigned long total_cycles;
-#endif
 
     /* entering NMI, resetting or IRQ? */
     bool in_nmi, in_rst, in_irq;
@@ -700,17 +676,17 @@ struct w65c02s_cpu {
     unsigned long maximum_cycles;
 #endif
 
+#if !W65C02S_LINK
+    /* memory read/write callbacks */
+    uint8_t (*mem_read)(struct w65c02s_cpu *, uint16_t);
+    void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t);
+#endif
     /* BRK, STP, end of instruction hooks */
     bool (*hook_brk)(uint8_t);
     bool (*hook_stp)(void);
     void (*hook_eoi)(void);
     /* data pointer from w65c02s_init */
     void *cpu_data;
-#if !W65C02S_LINK
-    /* memory read/write callbacks */
-    uint8_t (*mem_read)(struct w65c02s_cpu *, uint16_t);
-    void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t);
-#endif
 };
 
 
@@ -824,12 +800,7 @@ struct w65c02s_cpu {
 /* used to implement instructions, etc. */
 #if W65C02S_COARSE
 /* increment the total cycle counter. */
-#if W65C02S_COARSE_CYCLE_COUNTER
-#define W65C02S_CYCLE_TOTAL_INC         
-#else
 #define W65C02S_CYCLE_TOTAL_INC     ++cpu->total_cycles;
-#endif
-
 /* end the instruction immediately. before a read/write! */
 #define W65C02S_SKIP_REST           return cyc
 /* skip to the next cycle n, which should always be the next cycle.
@@ -850,12 +821,7 @@ struct w65c02s_cpu {
 #define W65C02S_TR                  tmp_
 #else /* !W65C02S_COARSE */
 
-#if W65C02S_COARSE_CYCLE_COUNTER
-#define W65C02S_CYCLE_CONDITION     !--cpu->left_cycles
-#else
 #define W65C02S_CYCLE_CONDITION     ++cpu->total_cycles == cpu->target_cycles
-#endif
-
 /* end the instruction immediately. before a read/write! */
 #define W65C02S_SKIP_REST           return 0
 /* skip to the next cycle n, which should always be the next cycle
@@ -928,13 +894,9 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 */
 
 /* get flag of P. returns 1 if flag set, 0 if not */
-#define W65C02S_GET_P(flag) (!!(cpu->p & (flag)))
+#define W65C02S_GET_P(p, flag) (!!((p) & (flag)))
 /* set flag of P */
-#define W65C02S_SET_P(flag, v) \
-    (cpu->p = (v) ? (cpu->p | (flag)) : (cpu->p & ~(flag)))
-/* set flag of P_adj (for correct BCD flags in ADC, SBC) */
-#define W65C02S_SET_P_ADJ(flag, v) \
-    (cpu->p_adj = (v) ? (cpu->p_adj | (flag)) : (cpu->p_adj & ~(flag)))
+#define W65C02S_SET_P(p, flag, v) ((p) = (v) ? ((p) | (flag)) : ((p) & ~(flag)))
 
 /* P flags */
 #define W65C02S_P_N 0x80
@@ -1109,18 +1071,24 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 
 
 
-/* update flags. N: bit 7 of result. Z: whether result is 0 */
+/* update flags. N: bit 7 of q. Z: whether q is 0 */
 W65C02S_INLINE uint8_t w65c02s_mark_nz(struct w65c02s_cpu *cpu, uint8_t q) {
-    W65C02S_SET_P(W65C02S_P_N, q & 0x80);
-    W65C02S_SET_P(W65C02S_P_Z, q == 0);
+    uint8_t p = cpu->p;
+    W65C02S_SET_P(p, W65C02S_P_N, q & 0x80);
+    W65C02S_SET_P(p, W65C02S_P_Z, q == 0);
+    cpu->p = p;
     return q;
 }
 
-/* update flags. N: bit 7 of result. Z: whether result is 0, C: as given */
+/* update flags. N: bit 7 of q. Z: whether q is 0, C: as given */
 W65C02S_INLINE uint8_t w65c02s_mark_nzc(struct w65c02s_cpu *cpu,
-                                        unsigned q, unsigned c) {
-    W65C02S_SET_P(W65C02S_P_C, c);
-    return w65c02s_mark_nz(cpu, q & 255);
+                                        uint8_t q, bool c) {
+    uint8_t p = cpu->p;
+    W65C02S_SET_P(p, W65C02S_P_N, q & 0x80);
+    W65C02S_SET_P(p, W65C02S_P_Z, q == 0);
+    W65C02S_SET_P(p, W65C02S_P_C, c);
+    cpu->p = p;
+    return q;
 }
 
 /* update flags. N: bit 7 of q. Z: whether q is 0, C: bit 8 of q */
@@ -1157,7 +1125,7 @@ W65C02S_INLINE uint8_t w65c02s_oper_lsr(struct w65c02s_cpu *cpu, uint8_t v) {
    fill in the old C, and shift the leftover bit to C. */
 W65C02S_INLINE uint8_t w65c02s_oper_rol(struct w65c02s_cpu *cpu, uint8_t v) {
     /* new carry is the highest bit */
-    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
+    uint8_t c = W65C02S_GET_P(cpu->p, W65C02S_P_C);
     return w65c02s_mark_nzc(cpu, (v << 1) | c, v >> 7);
 }
 
@@ -1165,7 +1133,7 @@ W65C02S_INLINE uint8_t w65c02s_oper_rol(struct w65c02s_cpu *cpu, uint8_t v) {
    fill in the old C, and shift the leftover bit to C. */
 W65C02S_INLINE uint8_t w65c02s_oper_ror(struct w65c02s_cpu *cpu, uint8_t v) {
     /* new carry is the lowest bit */
-    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
+    uint8_t c = W65C02S_GET_P(cpu->p, W65C02S_P_C);
     return w65c02s_mark_nzc(cpu, (v >> 1) | (c << 7), v & 1);
 }
 
@@ -1180,22 +1148,24 @@ static uint8_t w65c02s_oper_adc_d(struct w65c02s_cpu *cpu,
                                   uint8_t a, uint8_t b, unsigned c) {
     /* BCD addition one nibble/digit at a time */
     unsigned lo, hi, hc, fc, q;
-    cpu->p_adj = cpu->p;
+    uint8_t p_adj;
 
     lo = (a & 15) + (b & 15) + c;       /* add low nibbles */
     hc = lo >= 10;                      /* half carry */
-    if (hc) lo = (lo - 10) & 15;        /* adjust result on half carry set */
+    lo = (hc ? lo - 10 : lo) & 15;        /* adjust result on half carry set */
 
     hi = (a >> 4) + (b >> 4) + hc;      /* add high nibbles */
     fc = hi >= 10;                      /* full carry */
-    if (fc) hi = (hi - 10) & 15;        /* adjust result on full carry set */
+    hi = (fc ? hi - 10 : hi) & 15;        /* adjust result on full carry set */
 
     q = (hi << 4) | lo;                 /* build result */
-    W65C02S_SET_P_ADJ(W65C02S_P_N, q >> 7);
-    W65C02S_SET_P_ADJ(W65C02S_P_Z, q == 0);
-    W65C02S_SET_P_ADJ(W65C02S_P_C, fc);
+
+    p_adj = fc ? W65C02S_P_C : 0;
+    W65C02S_SET_P(cpu->p, W65C02S_P_C, fc);
+    W65C02S_SET_P(p_adj, W65C02S_P_N, q >> 7);
+    W65C02S_SET_P(p_adj, W65C02S_P_Z, q == 0);
     /* keep W65C02S_P_V as in binary addition */
-    W65C02S_SET_P(W65C02S_P_C, fc);
+    cpu->p_adj = p_adj;
     return (uint8_t)q;
 }
 
@@ -1203,46 +1173,50 @@ static uint8_t w65c02s_oper_sbc_d(struct w65c02s_cpu *cpu,
                                   uint8_t a, uint8_t b, unsigned c) {
     /* BCD subtraction one nibble/digit at a time */
     unsigned lo, hi, hc, fc, q;
-    cpu->p_adj = cpu->p;
+    uint8_t p_adj;
     
     lo = (a & 15) + (b & 15) + c;       /* subtract low nibbles */
     hc = lo >= 16;                      /* half carry */
-    lo = (hc ? lo : lo + 10) & 15;      /* adjust result on half carry set */
+    lo = (hc ? lo : 10 + lo) & 15;      /* adjust result on half carry set */
 
     hi = (a >> 4) + (b >> 4) + hc;      /* subtract high nibbles */
     fc = hi >= 16;                      /* full carry */
-    hi = (fc ? hi : hi + 10) & 15;      /* adjust result on full carry set */
+    hi = (fc ? hi : 10 + hi) & 15;      /* adjust result on full carry set */
 
     q = (hi << 4) | lo;                 /* build result */
-    W65C02S_SET_P_ADJ(W65C02S_P_N, q >> 7);
-    W65C02S_SET_P_ADJ(W65C02S_P_Z, q == 0);
-    W65C02S_SET_P_ADJ(W65C02S_P_C, fc);
+    
+    p_adj = fc ? W65C02S_P_C : 0;
+    W65C02S_SET_P(cpu->p, W65C02S_P_C, fc);
+    W65C02S_SET_P(p_adj, W65C02S_P_N, q >> 7);
+    W65C02S_SET_P(p_adj, W65C02S_P_Z, q == 0);
     /* keep W65C02S_P_V as in binary addition */
-    W65C02S_SET_P(W65C02S_P_C, fc);
+    cpu->p_adj = p_adj;
     return (uint8_t)q;
 }
 
 /* ADC a, b = a + b + c (except in BCD mode). updates N, Z, V, C. */
 W65C02S_INLINE uint8_t w65c02s_oper_adc(struct w65c02s_cpu *cpu,
                                         uint8_t a, uint8_t b) {
-    uint8_t r;
-    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
-    W65C02S_SET_P(W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
-    r = w65c02s_mark_nzc8(cpu, a + b + c);
-    if (!W65C02S_GET_P(W65C02S_P_D)) return r;
-    return w65c02s_oper_adc_d(cpu, a, b, c);
+    uint8_t r, p = cpu->p;
+    uint8_t c = W65C02S_GET_P(p, W65C02S_P_C); /* old carry */
+    /* update V flag */
+    cpu->p = W65C02S_SET_P(p, W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
+    r = w65c02s_mark_nzc8(cpu, a + b + c); /* update N, Z, C */
+    if (!W65C02S_GET_P(p, W65C02S_P_D)) return r;
+    return w65c02s_oper_adc_d(cpu, a, b, c); /* use decimal mode instead */
 }
 
 /* SBC a, b = a + ~b + c (except in BCD mode). updates N, Z, V, C. */
 W65C02S_INLINE uint8_t w65c02s_oper_sbc(struct w65c02s_cpu *cpu,
                                         uint8_t a, uint8_t b) {
-    uint8_t r;
-    uint8_t c = W65C02S_GET_P(W65C02S_P_C);
-    b = ~b;
-    W65C02S_SET_P(W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
-    r = w65c02s_mark_nzc8(cpu, a + b + c);
-    if (!W65C02S_GET_P(W65C02S_P_D)) return r;
-    return w65c02s_oper_sbc_d(cpu, a, b, c);
+    uint8_t r, p = cpu->p;
+    uint8_t c = W65C02S_GET_P(p, W65C02S_P_C); /* old carry */
+    b = ~b; /* flip B -- SBC A, B == ADC A, ~B */
+    /* update V flag */
+    cpu->p = W65C02S_SET_P(p, W65C02S_P_V, w65c02s_oper_adc_v(a, b, c));
+    r = w65c02s_mark_nzc8(cpu, a + b + c); /* update N, Z, C */
+    if (!W65C02S_GET_P(p, W65C02S_P_D)) return r;
+    return w65c02s_oper_sbc_d(cpu, a, b, c); /* use decimal mode instead */
 }
 
 /* CMP a, b = a - b, but update only flags N, Z, C. */
@@ -1255,24 +1229,24 @@ W65C02S_INLINE void w65c02s_oper_cmp(struct w65c02s_cpu *cpu,
 static void w65c02s_oper_bit(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
     /* in BIT, N (b7) and V (b6) are bits 7 and 6 of the memory operand */
     cpu->p = (b & 0xC0) | (cpu->p & 0x3F);
-    W65C02S_SET_P(W65C02S_P_Z, !(a & b));
+    W65C02S_SET_P(cpu->p, W65C02S_P_Z, !(a & b));
 }
 
 /* BIT a, #b ($89) does not update N and V, only Z. */
 W65C02S_INLINE void w65c02s_oper_bit_imm(struct w65c02s_cpu *cpu,
                                          uint8_t a, uint8_t b) {
-    W65C02S_SET_P(W65C02S_P_Z, !(a & b));
+    W65C02S_SET_P(cpu->p, W65C02S_P_Z, !(a & b));
 }
 
 /* TSB(set=1)/TRB(set=0) a, b. returns new value of b. updates Z. */
 static uint8_t w65c02s_oper_tsb(struct w65c02s_cpu *cpu,
                                 uint8_t a, uint8_t b, bool set) {
-    W65C02S_SET_P(W65C02S_P_Z, !(a & b));
+    W65C02S_SET_P(cpu->p, W65C02S_P_Z, !(a & b));
     return set ? b | a : b & ~a;
 }
 
 /* perform RMW op on value v and return new value. updates flags. */
-static uint8_t w65c02s_oper_rmw(struct w65c02s_cpu *cpu,
+W65C02S_INLINE uint8_t w65c02s_oper_rmw(struct w65c02s_cpu *cpu,
                                 unsigned op, uint8_t v) {
     switch (op) {
         case W65C02S_OPER_ASL: return w65c02s_oper_asl(cpu, v);
@@ -1301,7 +1275,7 @@ W65C02S_INLINE uint8_t w65c02s_oper_alu(struct w65c02s_cpu *cpu,
 }
 
 /* returns whether to take the branch op with the current value of P */
-static bool w65c02s_oper_branch(unsigned op, uint8_t p) {
+W65C02S_INLINE bool w65c02s_oper_branch(unsigned op, uint8_t p) {
     /* whether to take the branch? */
     switch (op) {
         case W65C02S_OPER_BPL: return !(p & W65C02S_P_N); /* if N clear */
@@ -1348,7 +1322,8 @@ W65C02S_INLINE uint8_t w65c02s_stack_pull(struct w65c02s_cpu *cpu) {
    to be called whenever the I flag changes in P. */
 W65C02S_INLINE void w65c02s_irq_update_mask(struct w65c02s_cpu *cpu) {
     /* note: W65C02S_CPU_STATE_IRQ == P_I */
-    cpu->int_mask = W65C02S_GET_P(W65C02S_P_I) ? ~W65C02S_CPU_STATE_IRQ : ~0;
+    cpu->int_mask = W65C02S_GET_P(cpu->p, W65C02S_P_I)
+                        ? ~W65C02S_CPU_STATE_IRQ : ~0;
 }
 
 /* latch interrupts from int_trig based on int_mask.
@@ -1363,8 +1338,8 @@ W65C02S_INLINE void w65c02s_irq_latch(struct w65c02s_cpu *cpu) {
 
 /* resets the IRQ flag and re-latches. used for extra cycles. */
 W65C02S_INLINE void w65c02s_irq_latch_slow(struct w65c02s_cpu *cpu) {
-    cpu->cpu_state &= ~W65C02S_CPU_STATE_IRQ;
-    w65c02s_irq_latch(cpu);
+    cpu->cpu_state = (cpu->cpu_state & ~W65C02S_CPU_STATE_IRQ)
+                   | (cpu->int_trig & cpu->int_mask);
 }
 
 /* selects an interrupt vector. used by BRK. */
@@ -1421,7 +1396,8 @@ static bool w65c02s_oper_imm(struct w65c02s_cpu *cpu, uint8_t v) {
         case W65C02S_OPER_ADC:
         case W65C02S_OPER_SBC:
             cpu->a = w65c02s_oper_alu(cpu, oper, cpu->a, v);
-            return W65C02S_GET_P(W65C02S_P_D); /* decimal mode penalty */
+            /* decimal mode penalty */
+            return W65C02S_GET_P(cpu->p, W65C02S_P_D);
 
         case W65C02S_OPER_CMP: w65c02s_oper_cmp(cpu, cpu->a, v);     break;
         case W65C02S_OPER_CPX: w65c02s_oper_cmp(cpu, cpu->x, v);     break;
@@ -1453,7 +1429,8 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
         case W65C02S_OPER_ADC:
         case W65C02S_OPER_SBC:
             cpu->a = w65c02s_oper_alu(cpu, oper, cpu->a, W65C02S_READ(ea));
-            return W65C02S_GET_P(W65C02S_P_D); /* decimal mode penalty */
+            /* decimal mode penalty */
+            return W65C02S_GET_P(cpu->p, W65C02S_P_D);
 
         case W65C02S_OPER_CMP:
             w65c02s_oper_cmp(cpu, cpu->a, W65C02S_READ(ea));
@@ -1499,8 +1476,9 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
 /* the extra cycle done on ADC/SBC if D is set. copies p_adj to p.
    skipped if flag is false (use the return value of
       w65c02s_oper_imm or w65c02s_oper_ea) */
+#define W65C02S_P_ADJ_MASK (W65C02S_P_N | W65C02S_P_Z | W65C02S_P_C)
 #define W65C02S_ADC_D_SPURIOUS(ea)                                             \
-    cpu->p = cpu->p_adj;                                                       \
+    cpu->p = (cpu->p & ~W65C02S_P_ADJ_MASK) | cpu->p_adj;                      \
     W65C02S_READ(ea);
     /* no need to update mask - p_adj never changes I */
 
@@ -1523,17 +1501,27 @@ static unsigned w65c02s_mode_implied(W65C02S_PARAMS_MODE) {
                     cpu->a = w65c02s_oper_rmw(cpu, oper, cpu->a);
                     break;
 
-                case W65C02S_OPER_CLV: W65C02S_SET_P(W65C02S_P_V, 0);   break;
-                case W65C02S_OPER_CLC: W65C02S_SET_P(W65C02S_P_C, 0);   break;
-                case W65C02S_OPER_SEC: W65C02S_SET_P(W65C02S_P_C, 1);   break;
-                case W65C02S_OPER_CLD: W65C02S_SET_P(W65C02S_P_D, 0);   break;
-                case W65C02S_OPER_SED: W65C02S_SET_P(W65C02S_P_D, 1);   break;
+                case W65C02S_OPER_CLV:
+                    W65C02S_SET_P(cpu->p, W65C02S_P_V, 0);
+                    break;
+                case W65C02S_OPER_CLC:
+                    W65C02S_SET_P(cpu->p, W65C02S_P_C, 0);
+                    break;
+                case W65C02S_OPER_SEC:
+                    W65C02S_SET_P(cpu->p, W65C02S_P_C, 1);
+                    break;
+                case W65C02S_OPER_CLD:
+                    W65C02S_SET_P(cpu->p, W65C02S_P_D, 0);
+                    break;
+                case W65C02S_OPER_SED:
+                    W65C02S_SET_P(cpu->p, W65C02S_P_D, 1);
+                    break;
                 case W65C02S_OPER_CLI:
-                    W65C02S_SET_P(W65C02S_P_I, 0);
+                    W65C02S_SET_P(cpu->p, W65C02S_P_I, 0);
                     w65c02s_irq_update_mask(cpu);
                     break;
                 case W65C02S_OPER_SEI:
-                    W65C02S_SET_P(W65C02S_P_I, 1);
+                    W65C02S_SET_P(cpu->p, W65C02S_P_I, 1);
                     w65c02s_irq_update_mask(cpu);
                     break;
 
@@ -1606,8 +1594,8 @@ static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
-            W65C02S_TR.ea += cpu->x;
             W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea += cpu->x;
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
@@ -1625,8 +1613,8 @@ static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
-            W65C02S_TR.ea += cpu->y;
             W65C02S_READ(cpu->pc++);
+            W65C02S_TR.ea += cpu->y;
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
@@ -1662,10 +1650,13 @@ static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
+        {
+            uint16_t page = W65C02S_READ(cpu->pc++) << 8;
             /* page wrap cycle? */
             W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->x);
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->x;
+            W65C02S_TR.ea += page | cpu->x;
             if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
+        }
         W65C02S_CYCLE(3)
             /* if we did not cross the page boundary, skip this cycle. */
             if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(4);
@@ -1688,10 +1679,9 @@ static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
         {
-            bool page_crossed;
-            W65C02S_TR.ea += cpu->x;
-            page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
-            W65C02S_TR.ea += W65C02S_READ(cpu->pc++) << 8;
+            uint16_t page = W65C02S_READ(cpu->pc++) << 8;
+            bool page_crossed = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->x);
+            W65C02S_TR.ea += page | cpu->x;
             W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
         }
         W65C02S_CYCLE(3)
@@ -1709,10 +1699,13 @@ static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
+        {
+            uint16_t page = W65C02S_READ(cpu->pc++) << 8;
             /* page wrap cycle? */
             W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y);
-            W65C02S_TR.ea += (W65C02S_READ(cpu->pc++) << 8) | cpu->y;
+            W65C02S_TR.ea += page | cpu->y;
             if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
+        }
         W65C02S_CYCLE(3)
             /* if we did not cross the page boundary, skip this cycle. */
             if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(4);
@@ -1735,10 +1728,9 @@ static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
         {
-            bool page_crossed;
-            W65C02S_TR.ea += cpu->y;
-            page_crossed = W65C02S_GET_HI(W65C02S_TR.ea);
-            W65C02S_TR.ea += W65C02S_READ(cpu->pc++) << 8;
+            uint16_t page = W65C02S_READ(cpu->pc++) << 8;
+            bool page_crossed = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y);
+            W65C02S_TR.ea += page | cpu->y;
             W65C02S_TR.ea_wrong = page_crossed ? cpu->pc - 1 : W65C02S_TR.ea;
         }
         W65C02S_CYCLE(3)
@@ -1774,9 +1766,10 @@ static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
-            W65C02S_TR.zp = W65C02S_READ(cpu->pc) + cpu->x;
+            W65C02S_TR.zp = W65C02S_READ(cpu->pc);
         W65C02S_CYCLE(2)
             W65C02S_READ(cpu->pc++);
+            W65C02S_TR.zp += cpu->x;
         W65C02S_CYCLE(3)
             W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(4)
@@ -1800,10 +1793,13 @@ static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(2)
             W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.zp++);
         W65C02S_CYCLE(3)
+        {
+            uint16_t page = W65C02S_READ(W65C02S_TR.zp) << 8;
             /* page wrap cycle? */
             W65C02S_TR.page_penalty = W65C02S_OVERFLOW8(W65C02S_TR.ea, cpu->y);
-            W65C02S_TR.ea += (W65C02S_READ(W65C02S_TR.zp) << 8) | cpu->y;
+            W65C02S_TR.ea += page | cpu->y;
             if (!W65C02S_TR.page_penalty) w65c02s_irq_latch(cpu);
+        }
         W65C02S_CYCLE(4)
             /* if we did not cross the page boundary, skip this cycle */
             if (!W65C02S_TR.page_penalty) W65C02S_SKIP_TO_NEXT(5);
@@ -1838,7 +1834,7 @@ static unsigned w65c02s_mode_zeropage_indirect_y_store(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_jump_absolute(W65C02S_PARAMS_MODE) {
-    W65C02S_USE_TR(addr)
+    W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
             W65C02S_TR.ea = W65C02S_READ(cpu->pc++);
@@ -1871,9 +1867,10 @@ static unsigned w65c02s_mode_jump_indirect_x(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(1)
             W65C02S_TR.ta = W65C02S_READ(cpu->pc++);
         W65C02S_CYCLE(2)
-            W65C02S_TR.ta += (W65C02S_READ(cpu->pc) << 8) | cpu->x;
+            W65C02S_TR.ta += W65C02S_READ(cpu->pc) << 8;
         W65C02S_CYCLE(3)
             W65C02S_READ(cpu->pc);
+            W65C02S_TR.ta += cpu->x;
         W65C02S_CYCLE(4)
             W65C02S_TR.ea = W65C02S_READ(W65C02S_TR.ta++);
             w65c02s_irq_latch(cpu);
@@ -1968,6 +1965,7 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
         {
             unsigned oper = cpu->oper;
             uint8_t data = W65C02S_TR.data;
+            W65C02S_READ(W65C02S_TR.ea);
             switch (oper) {
                 case W65C02S_OPER_DEC:
                 case W65C02S_OPER_INC:
@@ -1986,7 +1984,6 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
                 default: W65C02S_UNREACHABLE();
             }
             W65C02S_TR.data = data;
-            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(4)
@@ -2004,8 +2001,8 @@ static unsigned w65c02s_mode_rmw_zeropage_x(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(3)
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(4)
-            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
             W65C02S_READ(W65C02S_TR.ea);
+            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
@@ -2025,6 +2022,7 @@ static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
         {
             unsigned oper = cpu->oper;
             uint8_t data = W65C02S_TR.data;
+            W65C02S_READ(W65C02S_TR.ea);
             switch (oper) {
                 case W65C02S_OPER_DEC:
                 case W65C02S_OPER_INC:
@@ -2043,7 +2041,6 @@ static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
                 default: W65C02S_UNREACHABLE();
             }
             W65C02S_TR.data = data;
-            W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         }
         W65C02S_CYCLE(5)
@@ -2110,20 +2107,20 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
         {
-            uint8_t tmp = w65c02s_stack_pull(cpu);
+            uint8_t tmp = w65c02s_mark_nz(cpu, w65c02s_stack_pull(cpu));
             switch (cpu->oper) {
                 case W65C02S_OPER_PLP:
-                    cpu->p = tmp | W65C02S_P_A1 | W65C02S_P_B;
+                    cpu->p = tmp;
                     w65c02s_irq_update_mask(cpu);
                     break;
                 case W65C02S_OPER_PLA:
-                    cpu->a = w65c02s_mark_nz(cpu, tmp);
+                    cpu->a = tmp;
                     break;
                 case W65C02S_OPER_PLX:
-                    cpu->x = w65c02s_mark_nz(cpu, tmp);
+                    cpu->x = tmp;
                     break;
                 case W65C02S_OPER_PLY:
-                    cpu->y = w65c02s_mark_nz(cpu, tmp);
+                    cpu->y = tmp;
                     break;
                 default: W65C02S_UNREACHABLE();
             }
@@ -2132,7 +2129,7 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_subroutine(W65C02S_PARAMS_MODE) {
-    W65C02S_USE_TR(addr)
+    W65C02S_USE_TR(ea)
     /* op = JSR abs */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2174,7 +2171,7 @@ static unsigned w65c02s_mode_stack_rti(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(2)
             W65C02S_READ(W65C02S_STACK_ADDR(cpu->s));
         W65C02S_CYCLE(3)
-            cpu->p = w65c02s_stack_pull(cpu) | W65C02S_P_A1 | W65C02S_P_B;
+            cpu->p = w65c02s_stack_pull(cpu);
             w65c02s_irq_update_mask(cpu);
         W65C02S_CYCLE(4)
             W65C02S_SET_LO(cpu->pc, w65c02s_stack_pull(cpu));
@@ -2211,17 +2208,14 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(4)
             if (cpu->in_rst) W65C02S_READ(W65C02S_STACK_ADDR(cpu->s--));
             else { /* B flag: 0 for NMI/IRQ, 1 for BRK */
-                uint8_t p = cpu->p | W65C02S_P_A1;
-                if (W65C02S_TR.is_brk)
-                    p |= W65C02S_P_B;
-                else
-                    p &= ~W65C02S_P_B;
+                uint8_t p = cpu->p | W65C02S_P_A1 | W65C02S_P_B;
+                if (!W65C02S_TR.is_brk) p &= ~W65C02S_P_B;
                 w65c02s_stack_push(cpu, p);
             }
             /* the I flag is automatically set on any interrupt or BRK. */
-            W65C02S_SET_P(W65C02S_P_I, 1);
+            W65C02S_SET_P(cpu->p, W65C02S_P_I, 1);
             /* the D flag is too, even if not on NMOS 6502. */
-            W65C02S_SET_P(W65C02S_P_D, 0);
+            W65C02S_SET_P(cpu->p, W65C02S_P_D, 0);
             w65c02s_irq_update_mask(cpu);
         W65C02S_CYCLE(5)
             /* NMI replaces IRQ if one is triggered before this cycle.
@@ -2249,7 +2243,7 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
 }
 
 static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
-    W65C02S_USE_TR(addr)
+    W65C02S_USE_TR(ea)
     /* op = NOP $5C, which behaves oddly */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2296,6 +2290,7 @@ static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
                                          W65C02S_CPU_STATE_WAIT);
             }
 #if !W65C02S_COARSE
+            /* end instruction immediately */
             cpu->cycl = 0;
 #endif
     W65C02S_END_INSTRUCTION
@@ -2639,6 +2634,7 @@ W65C02S_INLINE void w65c02s_decode(struct w65c02s_cpu *cpu, uint8_t ir) {
 
 
 W65C02S_INLINE void w65c02s_handle_reset(struct w65c02s_cpu *cpu) {
+    uint8_t p = cpu->p;
     /* do RESET */
     cpu->in_rst = true;
     cpu->in_nmi = cpu->in_irq = false;
@@ -2646,8 +2642,9 @@ W65C02S_INLINE void w65c02s_handle_reset(struct w65c02s_cpu *cpu) {
     W65C02S_CPU_STATE_CLEAR_RESET(cpu);
     W65C02S_CPU_STATE_CLEAR_NMI(cpu);
     W65C02S_CPU_STATE_CLEAR_IRQ(cpu);
-    W65C02S_SET_P(W65C02S_P_A1, 1);
-    W65C02S_SET_P(W65C02S_P_B, 1);
+    W65C02S_SET_P(p, W65C02S_P_A1, 1);
+    W65C02S_SET_P(p, W65C02S_P_B, 1);
+    cpu->p = p;
 }
 
 W65C02S_INLINE void w65c02s_handle_nmi(struct w65c02s_cpu *cpu) {
@@ -2683,11 +2680,7 @@ W65C02S_INLINE void w65c02s_handle_end_of_instruction(struct w65c02s_cpu *cpu) {
 #endif
 }
 
-#if !W65C02S_COARSE_CYCLE_COUNTER
 #define W65C02S_SPENT_CYCLE             ++cpu->total_cycles
-#else
-#define W65C02S_SPENT_CYCLE
-#endif
 
 #define W65C02S_STARTING_INSTRUCTION false
 #define W65C02S_CONTINUE_INSTRUCTION true
@@ -2749,11 +2742,7 @@ static bool w65c02s_handle_stp_wai_c(struct w65c02s_cpu *cpu) {
 static unsigned long w65c02s_execute_c(struct w65c02s_cpu *cpu,
                                        unsigned long maximum_cycles) {
     cpu->maximum_cycles = maximum_cycles;
-#if W65C02S_COARSE_CYCLE_COUNTER
-    cpu->left_cycles = maximum_cycles;
-#else
     cpu->target_cycles = cpu->total_cycles + maximum_cycles;
-#endif
     if (cpu->cycl) {
         /* continue running instruction */
         if (w65c02s_run_mode(cpu, W65C02S_CONTINUE_INSTRUCTION)) {
@@ -2776,11 +2765,7 @@ static unsigned long w65c02s_execute_c(struct w65c02s_cpu *cpu,
 
 decoded:
         cpu->cycl = 0;
-#if W65C02S_COARSE_CYCLE_COUNTER
-        cyclecount = cpu->left_cycles;
-#else
         cyclecount = cpu->total_cycles;
-#endif
         if (W65C02S_UNLIKELY(W65C02S_CYCLE_CONDITION)) {
             cpu->cycl = 1; /* stopped after decoding, continue from there */
             return cpu->maximum_cycles;
@@ -2789,23 +2774,15 @@ decoded:
         if (W65C02S_UNLIKELY(w65c02s_run_mode(cpu,
                              W65C02S_STARTING_INSTRUCTION))) {
             if (cpu->cycl) {
-#if W65C02S_COARSE_CYCLE_COUNTER
-                cpu->cycl += cyclecount - cpu->left_cycles;
-#else
                 cpu->cycl += cpu->total_cycles - cyclecount;
-#endif
             } else {
                 w65c02s_handle_end_of_instruction(cpu);
             }
             return cpu->maximum_cycles;
         }
 
-#if W65C02S_COARSE_CYCLE_COUNTER
-#define W65C02S_CYCLES_NOW (cpu->maximum_cycles - cpu->left_cycles)
-#else
 #define W65C02S_CYCLES_NOW \
     (cpu->maximum_cycles - (cpu->target_cycles - cpu->total_cycles))
-#endif
 end_of_instruction:
         w65c02s_handle_end_of_instruction(cpu);
         if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN)) {
@@ -2819,17 +2796,9 @@ check_special_state:
 
 W65C02S_INLINE unsigned w65c02s_run_mode_c(struct w65c02s_cpu *cpu,
                                            bool cont) {
-#if W65C02S_COARSE_CYCLE_COUNTER
-    cpu->left_cycles = cont ? 0 : -1;
-#else
     cpu->target_cycles = cpu->total_cycles - (cont ? 0 : 1);
-#endif
     w65c02s_run_mode(cpu, cont);
-#if W65C02S_COARSE_CYCLE_COUNTER
-    return -cpu->left_cycles;
-#else
     return cpu->total_cycles - cpu->target_cycles;
-#endif
 }
 
 static unsigned long w65c02s_execute_ic(struct w65c02s_cpu *cpu) {
@@ -2942,6 +2911,8 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
     cpu->hook_eoi = NULL;
     cpu->cpu_data = cpu_data;
 
+    cpu->pc = 0xFFFFU;
+    cpu->a = cpu->x = cpu->y = cpu->s = cpu->p = 0xFF;
     cpu->cpu_state = W65C02S_CPU_STATE_RESET;
 }
 
@@ -2955,9 +2926,6 @@ unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
 #else
     c = w65c02s_execute_c(cpu, cycles);
 #endif
-#if W65C02S_COARSE_CYCLE_COUNTER
-    cpu->total_cycles += c;
-#endif
     return c;
 }
 
@@ -2970,9 +2938,6 @@ unsigned long w65c02s_step_instruction(struct w65c02s_cpu *cpu) {
     else
 #endif
         cycles = w65c02s_execute_i(cpu);
-#if W65C02S_COARSE_CYCLE_COUNTER
-    cpu->total_cycles += cycles;
-#endif
 #if !W65C02S_COARSE
     cpu->cycl = 0;
 #endif
@@ -2997,9 +2962,6 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
     (void)finish_existing;
     total_cycles = w65c02s_execute_im(cpu, instructions);
 #endif
-#if W65C02S_COARSE_CYCLE_COUNTER
-    cpu->total_cycles += total_cycles;
-#endif
 #if !W65C02S_COARSE
     cpu->cycl = 0;
 #endif
@@ -3009,15 +2971,9 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
 void w65c02s_break(struct w65c02s_cpu *cpu) {
 #if !W65C02S_COARSE
     /* also adjust the cycle counters so we stop right away. */
-#if W65C02S_COARSE_CYCLE_COUNTER
-    unsigned long cycles_skipped = cpu->left_cycles - 1;
-    cpu->maximum_cycles -= cycles_skipped;
-    cpu->left_cycles = 1;
-#else
     unsigned long cycles_skipped = cpu->target_cycles - cpu->total_cycles - 1;
     cpu->maximum_cycles -= cycles_skipped;
     cpu->target_cycles = cpu->total_cycles + 1;
-#endif
 #endif
     W65C02S_CPU_STATE_SET_FLAG(cpu, W65C02S_CPU_STATE_BREAK);
 }

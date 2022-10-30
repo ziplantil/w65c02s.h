@@ -114,10 +114,6 @@ Gets the total number of cycles executed by this CPU.
 unsigned long w65c02s_get_cycle_count(const struct w65c02s_cpu *cpu);
 ```
 
-If the library has been compiled with `W65C02S_COARSE_CYCLE_COUNTER`, this
-value might not be updated between calls to `w65c02s_run_cycles` or
-`w65c02s_run_instructions`.
-
 If it hasn't, the value returned by this function reflects how many cycles have
 been run. For example, on the first reset cycle (spurious read of the PC) of a
 new CPU instance, this will return 0.

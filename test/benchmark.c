@@ -25,6 +25,7 @@ _Alignas(128)
 uint8_t ram[65536];
 struct w65c02s_cpu cpu;
 unsigned long cycles;
+uint16_t vector = 0;
 
 uint8_t w65c02s_read(uint16_t a) {
     return ram[a];
@@ -34,17 +35,15 @@ void w65c02s_write(uint16_t a, uint8_t v) {
     ram[a] = v;
 }
 
-uint16_t vector = 0;
-
 struct measurement {
     double t;
 };
 
-void measurement_reset(struct measurement *m) {
+static void measurement_reset(struct measurement *m) {
     m->t = (double)clock() / CLOCKS_PER_SEC;
 }
 
-double measurement_sample(struct measurement *m) {
+static double measurement_sample(struct measurement *m) {
     double t1 = (double)clock() / CLOCKS_PER_SEC;
     return t1 - m->t;
 }
@@ -87,7 +86,7 @@ int main(int argc, char *argv[]) {
 #else
     printf("Running %lu cycles\n", cycles);
 #endif
-
+    
     w65c02s_init(&cpu, NULL, NULL, NULL);
     
     for (i = 0; i < tries; ++i) {
@@ -97,7 +96,7 @@ int main(int argc, char *argv[]) {
 
         w65c02s_reset(&cpu);
         /* RESET cycles */
-        w65c02s_run_instructions(&cpu, 1, false);
+        w65c02s_run_instructions(&cpu, 1, true);
         cpu.pc = vector;
         
         measurement_reset(&measure);
