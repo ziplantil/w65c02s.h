@@ -9,8 +9,8 @@ ifdef DEBUG
 CFLAGS=-Og -g -Wall -Werror -Wpedantic -ansi -pedantic
 LFLAGS=
 else
-CFLAGS=-O3 -g -flto
-LFLAGS=-flto
+CFLAGS=-O3 -g
+LFLAGS=
 endif
 
 HEADERS=../include/w65c02s.h

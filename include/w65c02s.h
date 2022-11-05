@@ -2700,6 +2700,8 @@ static bool w65c02s_handle_stp_wai_i(struct w65c02s_cpu *cpu) {
                 return false;
             }
         case W65C02S_CPU_STATE_STOP:
+            if (W65C02S_CPU_STATE_HAS_RESET(cpu))
+                return false;
             /* spurious read to waste a cycle */
             W65C02S_READ(cpu->pc); /* stall for a cycle */
             W65C02S_SPENT_CYCLE;
@@ -2821,7 +2823,7 @@ static unsigned long w65c02s_execute_ic(struct w65c02s_cpu *cpu) {
 
 #endif /* W65C02S_COARSE */
 
-static unsigned long w65c02s_execute_ii(struct w65c02s_cpu *cpu) {
+static unsigned long w65c02s_execute_i(struct w65c02s_cpu *cpu) {
     unsigned cycles;
     uint8_t ir;
 
@@ -2849,10 +2851,6 @@ decoded:
     return cycles;
 }
 
-static unsigned long w65c02s_execute_i(struct w65c02s_cpu *cpu) {
-    return w65c02s_execute_ii(cpu);
-}
-
 #if W65C02S_COARSE
 
 static unsigned long w65c02s_execute_ix(struct w65c02s_cpu *cpu,
@@ -2861,7 +2859,7 @@ static unsigned long w65c02s_execute_ix(struct w65c02s_cpu *cpu,
     /* we may overflow otherwise */
     if (cycles > ULONG_MAX - 8) cycles = ULONG_MAX - 8;
     while (c < cycles) {
-        unsigned ic = w65c02s_execute_ii(cpu);
+        unsigned ic = w65c02s_execute_i(cpu);
         if (W65C02S_UNLIKELY(!ic)) break; /* w65c02s_break() */
         c += ic;
     }
@@ -2874,11 +2872,7 @@ static unsigned long w65c02s_execute_im(struct w65c02s_cpu *cpu,
                                         unsigned long instructions) {
     unsigned long c = 0;
     while (instructions--) {
-#if W65C02S_COARSE
-        c += w65c02s_execute_ii(cpu);
-#else
         c += w65c02s_execute_i(cpu);
-#endif
     }
     return c;
 }
