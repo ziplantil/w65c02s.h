@@ -2,7 +2,7 @@
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
             by ziplantil 2022 -- under the CC0 license
-            version: 2022-10-30
+            version: 2022-11-05
             please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
 
@@ -659,9 +659,9 @@ struct w65c02s_cpu {
     } temp;
 #endif
 
-    /* addressing mode, operation */
-    unsigned int mode, oper;
 #if !W65C02S_COARSE
+    /* current instruction */
+    uint8_t ir;
     /* cycle of current instruction */
     unsigned int cycl;
 #endif
@@ -806,7 +806,7 @@ struct w65c02s_cpu {
 /* skip to the next cycle n, which should always be the next cycle.
    must happen before a read/write! */
 #define W65C02S_SKIP_TO_NEXT(n)     goto cycle_##n;
-#define W65C02S_BEGIN_INSTRUCTION   unsigned cyc = 1;
+#define W65C02S_BEGIN_INSTRUCTION   unsigned cyc = 1; (void)oper;
 #define W65C02S_CYCLE_END           ++cyc; W65C02S_CYCLE_TOTAL_INC
 #define W65C02S_CYCLE_LABEL_1(n)        
 #define W65C02S_CYCLE_LABEL_X(n)    goto cycle_##n; cycle_##n:
@@ -834,6 +834,7 @@ struct w65c02s_cpu {
 #define W65C02S_SKIP_POST_ACCESS    return 0
 #define W65C02S_BEGIN_INSTRUCTION   if (W65C02S_LIKELY(!cont))                 \
                                         goto cycle_1;                          \
+                                    (void)oper;                                \
                                     switch (cpu->cycl) {
 #define W65C02S_CYCLE_END           if (W65C02S_UNLIKELY(                      \
                                         W65C02S_CYCLE_CONDITION                \
@@ -979,7 +980,7 @@ becomes something like (with W65C02S_COARSE=0, W65C02S_CYCLE_COUNTER=1)
 #define W65C02S_MODE_ABSOLUTE_Y_STORE               33      /*! STA abs,y */
 #define W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE      34      /*! STA (zp),y */
 
-/* all possible values for cpu->oper. note that for
+/* all possible values for oper. note that for
    W65C02S_MODE_ZEROPAGE_BIT and W65C02S_MODE_RELATIVE_BIT,
    the value is always 0-7 (bit) + 8 (S/R) */
 /* NOP */
@@ -1233,9 +1234,8 @@ static void w65c02s_oper_bit(struct w65c02s_cpu *cpu, uint8_t a, uint8_t b) {
 }
 
 /* BIT a, #b ($89) does not update N and V, only Z. */
-W65C02S_INLINE void w65c02s_oper_bit_imm(struct w65c02s_cpu *cpu,
-                                         uint8_t a, uint8_t b) {
-    W65C02S_SET_P(cpu->p, W65C02S_P_Z, !(a & b));
+static void w65c02s_oper_bit_imm(struct w65c02s_cpu *cpu, uint8_t b) {
+    W65C02S_SET_P(cpu->p, W65C02S_P_Z, !(cpu->a & b));
 }
 
 /* TSB(set=1)/TRB(set=0) a, b. returns new value of b. updates Z. */
@@ -1360,16 +1360,6 @@ W65C02S_INLINE uint16_t w65c02s_compute_branch(uint16_t pc, uint8_t offset) {
     return pc + offset - (offset & 0x80 ? 0x100 : 0);
 }
 
-
-
-/* +------------------------------------------------------------------------+ */
-/* |                                                                        | */
-/* |                            ADDRESSING MODES                            | */
-/* |                                                                        | */
-/* +------------------------------------------------------------------------+ */
-
-
-
 /* most RMW abs,x instructions can avoid a penalty cycle, but INC, DEC cannot */
 W65C02S_INLINE bool w65c02s_slow_rmw_absx(unsigned oper) {
     switch (oper) {
@@ -1381,8 +1371,8 @@ W65C02S_INLINE bool w65c02s_slow_rmw_absx(unsigned oper) {
 }
 
 /* false = no penalty, true = decimal mode penalty */
-static bool w65c02s_oper_imm(struct w65c02s_cpu *cpu, uint8_t v) {
-    unsigned oper = cpu->oper;
+W65C02S_INLINE bool w65c02s_oper_imm(struct w65c02s_cpu *cpu,
+                                     unsigned oper, uint8_t v) {
     switch (oper) {
         case W65C02S_OPER_NOP:
             break;
@@ -1402,7 +1392,7 @@ static bool w65c02s_oper_imm(struct w65c02s_cpu *cpu, uint8_t v) {
         case W65C02S_OPER_CMP: w65c02s_oper_cmp(cpu, cpu->a, v);     break;
         case W65C02S_OPER_CPX: w65c02s_oper_cmp(cpu, cpu->x, v);     break;
         case W65C02S_OPER_CPY: w65c02s_oper_cmp(cpu, cpu->y, v);     break;
-        case W65C02S_OPER_BIT: w65c02s_oper_bit_imm(cpu, cpu->a, v); break;
+        case W65C02S_OPER_BIT: w65c02s_oper_bit_imm(cpu, v);         break;
         
         case W65C02S_OPER_LDA: cpu->a = w65c02s_mark_nz(cpu, v);     break;
         case W65C02S_OPER_LDX: cpu->x = w65c02s_mark_nz(cpu, v);     break;
@@ -1413,8 +1403,8 @@ static bool w65c02s_oper_imm(struct w65c02s_cpu *cpu, uint8_t v) {
 }
 
 /* false = no penalty, true = decimal mode penalty */
-static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
-    unsigned oper = cpu->oper;
+W65C02S_INLINE bool w65c02s_oper_ea(struct w65c02s_cpu *cpu,
+                                    unsigned oper, uint16_t ea) {
     switch (oper) {
         case W65C02S_OPER_NOP:
             W65C02S_READ(ea);
@@ -1464,13 +1454,23 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
     return false;
 }
 
+
+
+/* +------------------------------------------------------------------------+ */
+/* |                                                                        | */
+/* |                            ADDRESSING MODES                            | */
+/* |                                                                        | */
+/* +------------------------------------------------------------------------+ */
+
+
+
 #if !W65C02S_COARSE
 /* current CPU, whether we are continuing an instruction */
-#define W65C02S_PARAMS_MODE struct w65c02s_cpu *cpu, bool cont
-#define W65C02S_GO_MODE(mode) return w65c02s_mode_##mode(cpu, cont)
+#define W65C02S_PARAMS_MODE struct w65c02s_cpu *cpu, unsigned oper, bool cont
+#define W65C02S_GO_MODE(mode, oper) return w65c02s_mode_##mode(cpu, oper, cont)
 #else
-#define W65C02S_PARAMS_MODE struct w65c02s_cpu *cpu
-#define W65C02S_GO_MODE(mode) return w65c02s_mode_##mode(cpu)
+#define W65C02S_PARAMS_MODE struct w65c02s_cpu *cpu, unsigned oper
+#define W65C02S_GO_MODE(mode, oper) return w65c02s_mode_##mode(cpu, oper)
 #endif
 
 /* the extra cycle done on ADC/SBC if D is set. copies p_adj to p.
@@ -1482,12 +1482,11 @@ static bool w65c02s_oper_ea(struct w65c02s_cpu *cpu, uint16_t ea) {
     W65C02S_READ(ea);
     /* no need to update mask - p_adj never changes I */
 
-static unsigned w65c02s_mode_implied(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_IMPLIED(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
-        {
-            unsigned oper = cpu->oper;
+            w65c02s_irq_latch(cpu);
             switch (oper) {
                 case W65C02S_OPER_NOP:
                     break;
@@ -1537,34 +1536,37 @@ static unsigned w65c02s_mode_implied(W65C02S_PARAMS_MODE) {
                 default: W65C02S_UNREACHABLE();
             }
             W65C02S_READ(cpu->pc);
-        }
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_implied_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_IMPLIED_X(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
-            cpu->x = w65c02s_oper_rmw(cpu, cpu->oper, cpu->x);
+            w65c02s_irq_latch(cpu);
+            cpu->x = w65c02s_oper_rmw(cpu, oper, cpu->x);
             W65C02S_READ(cpu->pc);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_implied_y(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_IMPLIED_Y(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
-            cpu->y = w65c02s_oper_rmw(cpu, cpu->oper, cpu->y);
+            w65c02s_irq_latch(cpu);
+            cpu->y = w65c02s_oper_rmw(cpu, oper, cpu->y);
             W65C02S_READ(cpu->pc);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_immediate(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_IMMEDIATE(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
+            w65c02s_irq_latch(cpu);
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_imm(cpu, W65C02S_READ(cpu->pc++))))
+            if (W65C02S_LIKELY(!w65c02s_oper_imm(cpu, oper,
+                                W65C02S_READ(cpu->pc++))))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(2)
@@ -1572,7 +1574,7 @@ static unsigned w65c02s_mode_immediate(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1580,7 +1582,7 @@ static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(2)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(3)
@@ -1588,7 +1590,7 @@ static unsigned w65c02s_mode_zeropage(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_X(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1599,7 +1601,7 @@ static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
@@ -1607,7 +1609,7 @@ static unsigned w65c02s_mode_zeropage_x(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_Y(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1618,7 +1620,7 @@ static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
@@ -1626,7 +1628,7 @@ static unsigned w65c02s_mode_zeropage_y(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_absolute(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1636,7 +1638,7 @@ static unsigned w65c02s_mode_absolute(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(3)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(4)
@@ -1644,7 +1646,7 @@ static unsigned w65c02s_mode_absolute(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_X(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1664,7 +1666,7 @@ static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
@@ -1672,7 +1674,7 @@ static unsigned w65c02s_mode_absolute_x(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_X_STORE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1689,11 +1691,11 @@ static unsigned w65c02s_mode_absolute_x_store(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* stores never have penalty cycles */
-            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_Y(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1713,7 +1715,7 @@ static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
@@ -1721,7 +1723,7 @@ static unsigned w65c02s_mode_absolute_y(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_Y_STORE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_page)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1738,11 +1740,11 @@ static unsigned w65c02s_mode_absolute_y_store(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* stores never have penalty cycles */
-            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_indirect(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_INDIRECT(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1754,7 +1756,7 @@ static unsigned w65c02s_mode_zeropage_indirect(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(5)
@@ -1762,7 +1764,7 @@ static unsigned w65c02s_mode_zeropage_indirect(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_INDIRECT_X(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1777,7 +1779,7 @@ static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
@@ -1785,7 +1787,7 @@ static unsigned w65c02s_mode_zeropage_indirect_x(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_INDIRECT_Y(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1807,7 +1809,7 @@ static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* penalty cycle? */
-            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, W65C02S_TR.ea)))
+            if (W65C02S_LIKELY(!w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea)))
                 W65C02S_SKIP_REST_AFTER; /* no penalty. */
             else w65c02s_irq_latch_slow(cpu);
         W65C02S_CYCLE(6)
@@ -1815,7 +1817,8 @@ static unsigned w65c02s_mode_zeropage_indirect_y(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_indirect_y_store(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ZEROPAGE_INDIRECT_Y_STORE(
+                                                        W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea_zp)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1829,11 +1832,12 @@ static unsigned w65c02s_mode_zeropage_indirect_y_store(W65C02S_PARAMS_MODE) {
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             /* stores never have penalty cycles */
-            w65c02s_oper_ea(cpu, W65C02S_TR.ea);
+            w65c02s_oper_ea(cpu, oper, W65C02S_TR.ea);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_jump_absolute(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_JUMP(W65C02S_PARAMS_MODE) {
+    /* oper = JMP */
     W65C02S_USE_TR(ea)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1844,7 +1848,8 @@ static unsigned w65c02s_mode_jump_absolute(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_jump_indirect(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_INDIRECT(W65C02S_PARAMS_MODE) {
+    /* oper = JMP */
     W65C02S_USE_TR(jump)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1861,7 +1866,8 @@ static unsigned w65c02s_mode_jump_indirect(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_jump_indirect_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_ABSOLUTE_INDIRECT_X(W65C02S_PARAMS_MODE) {
+    /* oper = JMP */
     W65C02S_USE_TR(jump)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1879,7 +1885,7 @@ static unsigned w65c02s_mode_jump_indirect_x(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_zeropage_bit(W65C02S_PARAMS_MODE) {
+static unsigned w65c02s_mode_ZEROPAGE_BIT(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1887,7 +1893,7 @@ static unsigned w65c02s_mode_zeropage_bit(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(2)
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(3)
-            W65C02S_TR.data = w65c02s_oper_bitset(cpu->oper, W65C02S_TR.data);
+            W65C02S_TR.data = w65c02s_oper_bitset(oper, W65C02S_TR.data);
             W65C02S_READ(W65C02S_TR.ea);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(4)
@@ -1895,11 +1901,12 @@ static unsigned w65c02s_mode_zeropage_bit(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RELATIVE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(branch)
     W65C02S_BEGIN_INSTRUCTION
         /* 0: w65c02s_irq_latch(cpu); (prerun) */
         W65C02S_CYCLE(1)
+            w65c02s_irq_latch(cpu);
         {
             /* note the post-increment of PC here! */
             uint8_t offset = W65C02S_READ(cpu->pc++);
@@ -1909,7 +1916,7 @@ static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
         }
         W65C02S_CYCLE(2)
             /* skip the rest of the instruction if branch is not taken */
-            if (!w65c02s_oper_branch(cpu->oper, cpu->p)) W65C02S_SKIP_REST;
+            if (!w65c02s_oper_branch(oper, cpu->p)) W65C02S_SKIP_REST;
             /* skip one read cycle if no page boundary crossed */
             if (W65C02S_GET_HI(cpu->pc = W65C02S_TR.new_pc)
                        == W65C02S_GET_HI(W65C02S_TR.old_pc))
@@ -1921,7 +1928,7 @@ static unsigned w65c02s_mode_relative(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
+static unsigned w65c02s_mode_RELATIVE_BIT(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(branch_bit)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1941,7 +1948,7 @@ static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
         }
         W65C02S_CYCLE(5)
             /* skip the rest of the instruction if branch is not taken */
-            if (!w65c02s_oper_bitbranch(cpu->oper, W65C02S_TR.data))
+            if (!w65c02s_oper_bitbranch(oper, W65C02S_TR.data))
                 W65C02S_SKIP_REST;
             /* skip one read cycle if no page boundary crossed */
             if (W65C02S_GET_HI(cpu->pc = W65C02S_TR.new_pc)
@@ -1954,7 +1961,7 @@ static unsigned w65c02s_mode_relative_bit(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RMW_ZEROPAGE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -1963,7 +1970,6 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(3)
         {
-            unsigned oper = cpu->oper;
             uint8_t data = W65C02S_TR.data;
             W65C02S_READ(W65C02S_TR.ea);
             switch (oper) {
@@ -1991,7 +1997,7 @@ static unsigned w65c02s_mode_rmw_zeropage(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_rmw_zeropage_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RMW_ZEROPAGE_X(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(rmw8)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2002,14 +2008,14 @@ static unsigned w65c02s_mode_rmw_zeropage_x(W65C02S_PARAMS_MODE) {
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(4)
             W65C02S_READ(W65C02S_TR.ea);
-            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
+            W65C02S_TR.data = w65c02s_oper_rmw(cpu, oper, W65C02S_TR.data);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(5)
             W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RMW_ABSOLUTE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2020,7 +2026,6 @@ static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(4)
         {
-            unsigned oper = cpu->oper;
             uint8_t data = W65C02S_TR.data;
             W65C02S_READ(W65C02S_TR.ea);
             switch (oper) {
@@ -2048,7 +2053,7 @@ static unsigned w65c02s_mode_rmw_absolute(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RMW_ABSOLUTE_X(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(rmw)
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2057,7 +2062,7 @@ static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
             W65C02S_SET_HI(W65C02S_TR.ea, W65C02S_READ(cpu->pc++));
         W65C02S_CYCLE(3)
         {
-            bool penalty = w65c02s_slow_rmw_absx(cpu->oper) ||
+            bool penalty = w65c02s_slow_rmw_absx(oper) ||
                     W65C02S_OVERFLOW8(cpu->x, W65C02S_GET_LO(W65C02S_TR.ea));
             W65C02S_TR.ea += cpu->x;
             /* if not INC and DEC and we did not cross a page, skip cycle. */
@@ -2068,14 +2073,14 @@ static unsigned w65c02s_mode_rmw_absolute_x(W65C02S_PARAMS_MODE) {
             W65C02S_TR.data = W65C02S_READ(W65C02S_TR.ea);
         W65C02S_CYCLE(5)
             W65C02S_READ(W65C02S_TR.ea);
-            W65C02S_TR.data = w65c02s_oper_rmw(cpu, cpu->oper, W65C02S_TR.data);
+            W65C02S_TR.data = w65c02s_oper_rmw(cpu, oper, W65C02S_TR.data);
             w65c02s_irq_latch(cpu);
         W65C02S_CYCLE(6)
             W65C02S_WRITE(W65C02S_TR.ea, W65C02S_TR.data);
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_stack_push(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_STACK_PUSH(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
             W65C02S_READ(cpu->pc);
@@ -2083,7 +2088,7 @@ static unsigned w65c02s_mode_stack_push(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(2)
         {
             uint8_t tmp;
-            switch (cpu->oper) {
+            switch (oper) {
                 case W65C02S_OPER_PHP:
                     /* PHP always pushes P with bits 5 and 4 set. */
                     tmp = cpu->p | W65C02S_P_A1 | W65C02S_P_B;
@@ -2098,7 +2103,7 @@ static unsigned w65c02s_mode_stack_push(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_STACK_PULL(W65C02S_PARAMS_MODE) {
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
             W65C02S_READ(cpu->pc);
@@ -2108,7 +2113,7 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(3)
         {
             uint8_t tmp = w65c02s_mark_nz(cpu, w65c02s_stack_pull(cpu));
-            switch (cpu->oper) {
+            switch (oper) {
                 case W65C02S_OPER_PLP:
                     cpu->p = tmp;
                     w65c02s_irq_update_mask(cpu);
@@ -2128,7 +2133,7 @@ static unsigned w65c02s_mode_stack_pull(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_subroutine(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_SUBROUTINE(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea)
     /* op = JSR abs */
     W65C02S_BEGIN_INSTRUCTION
@@ -2146,7 +2151,7 @@ static unsigned w65c02s_mode_subroutine(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_return_sub(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_RETURN_SUB(W65C02S_PARAMS_MODE) {
     /* op = RTS */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2163,7 +2168,7 @@ static unsigned w65c02s_mode_return_sub(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_stack_rti(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_STACK_RTI(W65C02S_PARAMS_MODE) {
     /* op = RTI */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
@@ -2181,7 +2186,7 @@ static unsigned w65c02s_mode_stack_rti(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_STACK_BRK(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(brk)
     /* op = BRK (possibly via NMI, IRQ or RESET) */
     W65C02S_BEGIN_INSTRUCTION
@@ -2222,6 +2227,7 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
                BRKs are apparently not affected by this */
             if ((cpu->int_trig & W65C02S_CPU_STATE_NMI) && cpu->in_irq) {
                 W65C02S_CPU_STATE_CLEAR_IRQ(cpu);
+                W65C02S_CPU_STATE_CLEAR_NMI(cpu);
                 cpu->int_trig &= ~W65C02S_CPU_STATE_NMI;
                 cpu->in_irq = false;
                 cpu->in_nmi = true;
@@ -2234,15 +2240,15 @@ static int w65c02s_mode_stack_brk(W65C02S_PARAMS_MODE) {
         W65C02S_CYCLE(7)
             /* end instantly! this is a "ghost" cycle in a way. */
             /* HW interrupts do not increment the instruction counter */
+            if (!W65C02S_TR.is_brk) --cpu->total_instructions;
 #if !W65C02S_COARSE
             cpu->cycl = 0;
 #endif
-            if (!W65C02S_TR.is_brk) --cpu->total_instructions;
             W65C02S_SKIP_REST;
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_NOP_5C(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(ea)
     /* op = NOP $5C, which behaves oddly */
     W65C02S_BEGIN_INSTRUCTION
@@ -2264,14 +2270,14 @@ static unsigned w65c02s_mode_nop_5c(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_INT_WAIT_STOP(W65C02S_PARAMS_MODE) {
     W65C02S_USE_TR(wai)
     /* op = WAI/STP */
     W65C02S_BEGIN_INSTRUCTION
         W65C02S_CYCLE(1)
             W65C02S_READ(cpu->pc);
             /* STP (1) or WAI (0) */
-            W65C02S_TR.is_stp = cpu->oper != W65C02S_OPER_WAI;
+            W65C02S_TR.is_stp = oper != W65C02S_OPER_WAI;
 #if W65C02S_HOOK_STP
             if (W65C02S_TR.is_stp && cpu->hook_stp && (*cpu->hook_stp)())
                 W65C02S_SKIP_REST;
@@ -2296,8 +2302,9 @@ static unsigned w65c02s_mode_int_wait_stop(W65C02S_PARAMS_MODE) {
     W65C02S_END_INSTRUCTION
 }
 
-static unsigned w65c02s_mode_implied_1c(W65C02S_PARAMS_MODE) {
+W65C02S_INLINE unsigned w65c02s_mode_IMPLIED_1C(W65C02S_PARAMS_MODE) {
     (void)cpu;
+    (void)oper;
 #if W65C02S_COARSE
     return 1; /* spent 1 cycle doing nothing */
 #else
@@ -2306,8 +2313,288 @@ static unsigned w65c02s_mode_implied_1c(W65C02S_PARAMS_MODE) {
 #endif
 }
 
-static void w65c02s_prerun_mode(struct w65c02s_cpu *cpu) {
-    switch (cpu->mode) {
+
+
+/* +------------------------------------------------------------------------+ */
+/* |                                                                        | */
+/* |                        OPCODE TABLE & EXECUTION                        | */
+/* |                                                                        | */
+/* +------------------------------------------------------------------------+ */
+
+
+
+#define W65C02S_OPCODE_TABLE()                                                 \
+W65C02S_OPCODE(0x00, STACK_BRK,                 W65C02S_OPER_BRK) /* BRK brk */\
+W65C02S_OPCODE(0x01, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_ORA) /* ORA zix */\
+W65C02S_OPCODE(0x02, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0x03, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x04, RMW_ZEROPAGE,              W65C02S_OPER_TSB) /* TSB wzp */\
+W65C02S_OPCODE(0x05, ZEROPAGE,                  W65C02S_OPER_ORA) /* ORA zpg */\
+W65C02S_OPCODE(0x06, RMW_ZEROPAGE,              W65C02S_OPER_ASL) /* ASL wzp */\
+W65C02S_OPCODE(0x07, ZEROPAGE_BIT,              000)              /* 000 zpb */\
+W65C02S_OPCODE(0x08, STACK_PUSH,                W65C02S_OPER_PHP) /* PHP phv */\
+W65C02S_OPCODE(0x09, IMMEDIATE,                 W65C02S_OPER_ORA) /* ORA imm */\
+W65C02S_OPCODE(0x0A, IMPLIED,                   W65C02S_OPER_ASL) /* ASL imp */\
+W65C02S_OPCODE(0x0B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x0C, RMW_ABSOLUTE,              W65C02S_OPER_TSB) /* TSB wab */\
+W65C02S_OPCODE(0x0D, ABSOLUTE,                  W65C02S_OPER_ORA) /* ORA abs */\
+W65C02S_OPCODE(0x0E, RMW_ABSOLUTE,              W65C02S_OPER_ASL) /* ASL wab */\
+W65C02S_OPCODE(0x0F, RELATIVE_BIT,              000)              /* 000 rlb */\
+W65C02S_OPCODE(0x10, RELATIVE,                  W65C02S_OPER_BPL) /* BPL rel */\
+W65C02S_OPCODE(0x11, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_ORA) /* ORA ziy */\
+W65C02S_OPCODE(0x12, ZEROPAGE_INDIRECT,         W65C02S_OPER_ORA) /* ORA zpi */\
+W65C02S_OPCODE(0x13, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x14, RMW_ZEROPAGE,              W65C02S_OPER_TRB) /* TRB wzp */\
+W65C02S_OPCODE(0x15, ZEROPAGE_X,                W65C02S_OPER_ORA) /* ORA zpx */\
+W65C02S_OPCODE(0x16, RMW_ZEROPAGE_X,            W65C02S_OPER_ASL) /* ASL wzx */\
+W65C02S_OPCODE(0x17, ZEROPAGE_BIT,              001)              /* 001 zpb */\
+W65C02S_OPCODE(0x18, IMPLIED,                   W65C02S_OPER_CLC) /* CLC imp */\
+W65C02S_OPCODE(0x19, ABSOLUTE_Y,                W65C02S_OPER_ORA) /* ORA aby */\
+W65C02S_OPCODE(0x1A, IMPLIED,                   W65C02S_OPER_INC) /* INC imp */\
+W65C02S_OPCODE(0x1B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x1C, RMW_ABSOLUTE,              W65C02S_OPER_TRB) /* TRB wab */\
+W65C02S_OPCODE(0x1D, ABSOLUTE_X,                W65C02S_OPER_ORA) /* ORA abx */\
+W65C02S_OPCODE(0x1E, RMW_ABSOLUTE_X,            W65C02S_OPER_ASL) /* ASL wax */\
+W65C02S_OPCODE(0x1F, RELATIVE_BIT,              001)              /* 001 rlb */\
+W65C02S_OPCODE(0x20, SUBROUTINE,                W65C02S_OPER_JSR) /* JSR sbj */\
+W65C02S_OPCODE(0x21, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_AND) /* AND zix */\
+W65C02S_OPCODE(0x22, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0x23, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x24, ZEROPAGE,                  W65C02S_OPER_BIT) /* BIT zpg */\
+W65C02S_OPCODE(0x25, ZEROPAGE,                  W65C02S_OPER_AND) /* AND zpg */\
+W65C02S_OPCODE(0x26, RMW_ZEROPAGE,              W65C02S_OPER_ROL) /* ROL wzp */\
+W65C02S_OPCODE(0x27, ZEROPAGE_BIT,              002)              /* 002 zpb */\
+W65C02S_OPCODE(0x28, STACK_PULL,                W65C02S_OPER_PLP) /* PLP plv */\
+W65C02S_OPCODE(0x29, IMMEDIATE,                 W65C02S_OPER_AND) /* AND imm */\
+W65C02S_OPCODE(0x2A, IMPLIED,                   W65C02S_OPER_ROL) /* ROL imp */\
+W65C02S_OPCODE(0x2B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x2C, ABSOLUTE,                  W65C02S_OPER_BIT) /* BIT abs */\
+W65C02S_OPCODE(0x2D, ABSOLUTE,                  W65C02S_OPER_AND) /* AND abs */\
+W65C02S_OPCODE(0x2E, RMW_ABSOLUTE,              W65C02S_OPER_ROL) /* ROL wab */\
+W65C02S_OPCODE(0x2F, RELATIVE_BIT,              002)              /* 002 rlb */\
+W65C02S_OPCODE(0x30, RELATIVE,                  W65C02S_OPER_BMI) /* BMI rel */\
+W65C02S_OPCODE(0x31, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_AND) /* AND ziy */\
+W65C02S_OPCODE(0x32, ZEROPAGE_INDIRECT,         W65C02S_OPER_AND) /* AND zpi */\
+W65C02S_OPCODE(0x33, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x34, ZEROPAGE_X,                W65C02S_OPER_BIT) /* BIT zpx */\
+W65C02S_OPCODE(0x35, ZEROPAGE_X,                W65C02S_OPER_AND) /* AND zpx */\
+W65C02S_OPCODE(0x36, RMW_ZEROPAGE_X,            W65C02S_OPER_ROL) /* ROL wzx */\
+W65C02S_OPCODE(0x37, ZEROPAGE_BIT,              003)              /* 003 zpb */\
+W65C02S_OPCODE(0x38, IMPLIED,                   W65C02S_OPER_SEC) /* SEC imp */\
+W65C02S_OPCODE(0x39, ABSOLUTE_Y,                W65C02S_OPER_AND) /* AND aby */\
+W65C02S_OPCODE(0x3A, IMPLIED,                   W65C02S_OPER_DEC) /* DEC imp */\
+W65C02S_OPCODE(0x3B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x3C, ABSOLUTE_X,                W65C02S_OPER_BIT) /* BIT abx */\
+W65C02S_OPCODE(0x3D, ABSOLUTE_X,                W65C02S_OPER_AND) /* AND abx */\
+W65C02S_OPCODE(0x3E, RMW_ABSOLUTE_X,            W65C02S_OPER_ROL) /* ROL wax */\
+W65C02S_OPCODE(0x3F, RELATIVE_BIT,              003)              /* 003 rlb */\
+W65C02S_OPCODE(0x40, STACK_RTI,                 W65C02S_OPER_RTI) /* RTI rti */\
+W65C02S_OPCODE(0x41, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_EOR) /* EOR zix */\
+W65C02S_OPCODE(0x42, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0x43, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x44, ZEROPAGE,                  W65C02S_OPER_NOP) /* NOP zpg */\
+W65C02S_OPCODE(0x45, ZEROPAGE,                  W65C02S_OPER_EOR) /* EOR zpg */\
+W65C02S_OPCODE(0x46, RMW_ZEROPAGE,              W65C02S_OPER_LSR) /* LSR wzp */\
+W65C02S_OPCODE(0x47, ZEROPAGE_BIT,              004)              /* 004 zpb */\
+W65C02S_OPCODE(0x48, STACK_PUSH,                W65C02S_OPER_PHA) /* PHA phv */\
+W65C02S_OPCODE(0x49, IMMEDIATE,                 W65C02S_OPER_EOR) /* EOR imm */\
+W65C02S_OPCODE(0x4A, IMPLIED,                   W65C02S_OPER_LSR) /* LSR imp */\
+W65C02S_OPCODE(0x4B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x4C, ABSOLUTE_JUMP,             W65C02S_OPER_JMP) /* JMP abj */\
+W65C02S_OPCODE(0x4D, ABSOLUTE,                  W65C02S_OPER_EOR) /* EOR abs */\
+W65C02S_OPCODE(0x4E, RMW_ABSOLUTE,              W65C02S_OPER_LSR) /* LSR wab */\
+W65C02S_OPCODE(0x4F, RELATIVE_BIT,              004)              /* 004 rlb */\
+W65C02S_OPCODE(0x50, RELATIVE,                  W65C02S_OPER_BVC) /* BVC rel */\
+W65C02S_OPCODE(0x51, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_EOR) /* EOR ziy */\
+W65C02S_OPCODE(0x52, ZEROPAGE_INDIRECT,         W65C02S_OPER_EOR) /* EOR zpi */\
+W65C02S_OPCODE(0x53, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x54, ZEROPAGE_X,                W65C02S_OPER_NOP) /* NOP zpx */\
+W65C02S_OPCODE(0x55, ZEROPAGE_X,                W65C02S_OPER_EOR) /* EOR zpx */\
+W65C02S_OPCODE(0x56, RMW_ZEROPAGE_X,            W65C02S_OPER_LSR) /* LSR wzx */\
+W65C02S_OPCODE(0x57, ZEROPAGE_BIT,              005)              /* 005 zpb */\
+W65C02S_OPCODE(0x58, IMPLIED,                   W65C02S_OPER_CLI) /* CLI imp */\
+W65C02S_OPCODE(0x59, ABSOLUTE_Y,                W65C02S_OPER_EOR) /* EOR aby */\
+W65C02S_OPCODE(0x5A, STACK_PUSH,                W65C02S_OPER_PHY) /* PHY phv */\
+W65C02S_OPCODE(0x5B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x5C, NOP_5C,                    W65C02S_OPER_NOP) /* NOP x5c */\
+W65C02S_OPCODE(0x5D, ABSOLUTE_X,                W65C02S_OPER_EOR) /* EOR abx */\
+W65C02S_OPCODE(0x5E, RMW_ABSOLUTE_X,            W65C02S_OPER_LSR) /* LSR wax */\
+W65C02S_OPCODE(0x5F, RELATIVE_BIT,              005)              /* 005 rlb */\
+W65C02S_OPCODE(0x60, RETURN_SUB,                W65C02S_OPER_RTS) /* RTS sbr */\
+W65C02S_OPCODE(0x61, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_ADC) /* ADC zix */\
+W65C02S_OPCODE(0x62, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0x63, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x64, ZEROPAGE,                  W65C02S_OPER_STZ) /* STZ zpg */\
+W65C02S_OPCODE(0x65, ZEROPAGE,                  W65C02S_OPER_ADC) /* ADC zpg */\
+W65C02S_OPCODE(0x66, RMW_ZEROPAGE,              W65C02S_OPER_ROR) /* ROR wzp */\
+W65C02S_OPCODE(0x67, ZEROPAGE_BIT,              006)              /* 006 zpb */\
+W65C02S_OPCODE(0x68, STACK_PULL,                W65C02S_OPER_PLA) /* PLA plv */\
+W65C02S_OPCODE(0x69, IMMEDIATE,                 W65C02S_OPER_ADC) /* ADC imm */\
+W65C02S_OPCODE(0x6A, IMPLIED,                   W65C02S_OPER_ROR) /* ROR imp */\
+W65C02S_OPCODE(0x6B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x6C, ABSOLUTE_INDIRECT,         W65C02S_OPER_JMP) /* JMP ind */\
+W65C02S_OPCODE(0x6D, ABSOLUTE,                  W65C02S_OPER_ADC) /* ADC abs */\
+W65C02S_OPCODE(0x6E, RMW_ABSOLUTE,              W65C02S_OPER_ROR) /* ROR wab */\
+W65C02S_OPCODE(0x6F, RELATIVE_BIT,              006)              /* 006 rlb */\
+W65C02S_OPCODE(0x70, RELATIVE,                  W65C02S_OPER_BVS) /* BVS rel */\
+W65C02S_OPCODE(0x71, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_ADC) /* ADC ziy */\
+W65C02S_OPCODE(0x72, ZEROPAGE_INDIRECT,         W65C02S_OPER_ADC) /* ADC zpi */\
+W65C02S_OPCODE(0x73, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x74, ZEROPAGE_X,                W65C02S_OPER_STZ) /* STZ zpx */\
+W65C02S_OPCODE(0x75, ZEROPAGE_X,                W65C02S_OPER_ADC) /* ADC zpx */\
+W65C02S_OPCODE(0x76, RMW_ZEROPAGE_X,            W65C02S_OPER_ROR) /* ROR wzx */\
+W65C02S_OPCODE(0x77, ZEROPAGE_BIT,              007)              /* 007 zpb */\
+W65C02S_OPCODE(0x78, IMPLIED,                   W65C02S_OPER_SEI) /* SEI imp */\
+W65C02S_OPCODE(0x79, ABSOLUTE_Y,                W65C02S_OPER_ADC) /* ADC aby */\
+W65C02S_OPCODE(0x7A, STACK_PULL,                W65C02S_OPER_PLY) /* PLY plv */\
+W65C02S_OPCODE(0x7B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x7C, ABSOLUTE_INDIRECT_X,       W65C02S_OPER_JMP) /* JMP idx */\
+W65C02S_OPCODE(0x7D, ABSOLUTE_X,                W65C02S_OPER_ADC) /* ADC abx */\
+W65C02S_OPCODE(0x7E, RMW_ABSOLUTE_X,            W65C02S_OPER_ROR) /* ROR wax */\
+W65C02S_OPCODE(0x7F, RELATIVE_BIT,              007)              /* 007 rlb */\
+W65C02S_OPCODE(0x80, RELATIVE,                  W65C02S_OPER_BRA) /* BRA rel */\
+W65C02S_OPCODE(0x81, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_STA) /* STA zix */\
+W65C02S_OPCODE(0x82, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0x83, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x84, ZEROPAGE,                  W65C02S_OPER_STY) /* STY zpg */\
+W65C02S_OPCODE(0x85, ZEROPAGE,                  W65C02S_OPER_STA) /* STA zpg */\
+W65C02S_OPCODE(0x86, ZEROPAGE,                  W65C02S_OPER_STX) /* STX zpg */\
+W65C02S_OPCODE(0x87, ZEROPAGE_BIT,              010)              /* 010 zpb */\
+W65C02S_OPCODE(0x88, IMPLIED_Y,                 W65C02S_OPER_DEC) /* DEC imy */\
+W65C02S_OPCODE(0x89, IMMEDIATE,                 W65C02S_OPER_BIT) /* BIT imm */\
+W65C02S_OPCODE(0x8A, IMPLIED,                   W65C02S_OPER_TXA) /* TXA imp */\
+W65C02S_OPCODE(0x8B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x8C, ABSOLUTE,                  W65C02S_OPER_STY) /* STY abs */\
+W65C02S_OPCODE(0x8D, ABSOLUTE,                  W65C02S_OPER_STA) /* STA abs */\
+W65C02S_OPCODE(0x8E, ABSOLUTE,                  W65C02S_OPER_STX) /* STX abs */\
+W65C02S_OPCODE(0x8F, RELATIVE_BIT,              010)              /* 010 rlb */\
+W65C02S_OPCODE(0x90, RELATIVE,                  W65C02S_OPER_BCC) /* BCC rel */\
+W65C02S_OPCODE(0x91, ZEROPAGE_INDIRECT_Y_STORE, W65C02S_OPER_STA) /* STA ziy */\
+W65C02S_OPCODE(0x92, ZEROPAGE_INDIRECT,         W65C02S_OPER_STA) /* STA zpi */\
+W65C02S_OPCODE(0x93, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x94, ZEROPAGE_X,                W65C02S_OPER_STY) /* STY zpx */\
+W65C02S_OPCODE(0x95, ZEROPAGE_X,                W65C02S_OPER_STA) /* STA zpx */\
+W65C02S_OPCODE(0x96, ZEROPAGE_Y,                W65C02S_OPER_STX) /* STX zpy */\
+W65C02S_OPCODE(0x97, ZEROPAGE_BIT,              011)              /* 011 zpb */\
+W65C02S_OPCODE(0x98, IMPLIED,                   W65C02S_OPER_TYA) /* TYA imp */\
+W65C02S_OPCODE(0x99, ABSOLUTE_Y_STORE,          W65C02S_OPER_STA) /* STA aby */\
+W65C02S_OPCODE(0x9A, IMPLIED,                   W65C02S_OPER_TXS) /* TXS imp */\
+W65C02S_OPCODE(0x9B, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0x9C, ABSOLUTE,                  W65C02S_OPER_STZ) /* STZ abs */\
+W65C02S_OPCODE(0x9D, ABSOLUTE_X_STORE,          W65C02S_OPER_STA) /* STA abx */\
+W65C02S_OPCODE(0x9E, ABSOLUTE_X_STORE,          W65C02S_OPER_STZ) /* STZ abx */\
+W65C02S_OPCODE(0x9F, RELATIVE_BIT,              011)              /* 011 rlb */\
+W65C02S_OPCODE(0xA0, IMMEDIATE,                 W65C02S_OPER_LDY) /* LDY imm */\
+W65C02S_OPCODE(0xA1, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_LDA) /* LDA zix */\
+W65C02S_OPCODE(0xA2, IMMEDIATE,                 W65C02S_OPER_LDX) /* LDX imm */\
+W65C02S_OPCODE(0xA3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xA4, ZEROPAGE,                  W65C02S_OPER_LDY) /* LDY zpg */\
+W65C02S_OPCODE(0xA5, ZEROPAGE,                  W65C02S_OPER_LDA) /* LDA zpg */\
+W65C02S_OPCODE(0xA6, ZEROPAGE,                  W65C02S_OPER_LDX) /* LDX zpg */\
+W65C02S_OPCODE(0xA7, ZEROPAGE_BIT,              012)              /* 012 zpb */\
+W65C02S_OPCODE(0xA8, IMPLIED,                   W65C02S_OPER_TAY) /* TAY imp */\
+W65C02S_OPCODE(0xA9, IMMEDIATE,                 W65C02S_OPER_LDA) /* LDA imm */\
+W65C02S_OPCODE(0xAA, IMPLIED,                   W65C02S_OPER_TAX) /* TAX imp */\
+W65C02S_OPCODE(0xAB, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xAC, ABSOLUTE,                  W65C02S_OPER_LDY) /* LDY abs */\
+W65C02S_OPCODE(0xAD, ABSOLUTE,                  W65C02S_OPER_LDA) /* LDA abs */\
+W65C02S_OPCODE(0xAE, ABSOLUTE,                  W65C02S_OPER_LDX) /* LDX abs */\
+W65C02S_OPCODE(0xAF, RELATIVE_BIT,              012)              /* 012 rlb */\
+W65C02S_OPCODE(0xB0, RELATIVE,                  W65C02S_OPER_BCS) /* BCS rel */\
+W65C02S_OPCODE(0xB1, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_LDA) /* LDA ziy */\
+W65C02S_OPCODE(0xB2, ZEROPAGE_INDIRECT,         W65C02S_OPER_LDA) /* LDA zpi */\
+W65C02S_OPCODE(0xB3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xB4, ZEROPAGE_X,                W65C02S_OPER_LDY) /* LDY zpx */\
+W65C02S_OPCODE(0xB5, ZEROPAGE_X,                W65C02S_OPER_LDA) /* LDA zpx */\
+W65C02S_OPCODE(0xB6, ZEROPAGE_Y,                W65C02S_OPER_LDX) /* LDX zpy */\
+W65C02S_OPCODE(0xB7, ZEROPAGE_BIT,              013)              /* 013 zpb */\
+W65C02S_OPCODE(0xB8, IMPLIED,                   W65C02S_OPER_CLV) /* CLV imp */\
+W65C02S_OPCODE(0xB9, ABSOLUTE_Y,                W65C02S_OPER_LDA) /* LDA aby */\
+W65C02S_OPCODE(0xBA, IMPLIED,                   W65C02S_OPER_TSX) /* TSX imp */\
+W65C02S_OPCODE(0xBB, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xBC, ABSOLUTE_X,                W65C02S_OPER_LDY) /* LDY abx */\
+W65C02S_OPCODE(0xBD, ABSOLUTE_X,                W65C02S_OPER_LDA) /* LDA abx */\
+W65C02S_OPCODE(0xBE, ABSOLUTE_Y,                W65C02S_OPER_LDX) /* LDX aby */\
+W65C02S_OPCODE(0xBF, RELATIVE_BIT,              013)              /* 013 rlb */\
+W65C02S_OPCODE(0xC0, IMMEDIATE,                 W65C02S_OPER_CPY) /* CPY imm */\
+W65C02S_OPCODE(0xC1, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_CMP) /* CMP zix */\
+W65C02S_OPCODE(0xC2, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0xC3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xC4, ZEROPAGE,                  W65C02S_OPER_CPY) /* CPY zpg */\
+W65C02S_OPCODE(0xC5, ZEROPAGE,                  W65C02S_OPER_CMP) /* CMP zpg */\
+W65C02S_OPCODE(0xC6, RMW_ZEROPAGE,              W65C02S_OPER_DEC) /* DEC wzp */\
+W65C02S_OPCODE(0xC7, ZEROPAGE_BIT,              014)              /* 014 zpb */\
+W65C02S_OPCODE(0xC8, IMPLIED_Y,                 W65C02S_OPER_INC) /* INC imy */\
+W65C02S_OPCODE(0xC9, IMMEDIATE,                 W65C02S_OPER_CMP) /* CMP imm */\
+W65C02S_OPCODE(0xCA, IMPLIED_X,                 W65C02S_OPER_DEC) /* DEC imx */\
+W65C02S_OPCODE(0xCB, INT_WAIT_STOP,             W65C02S_OPER_WAI) /* WAI wai */\
+W65C02S_OPCODE(0xCC, ABSOLUTE,                  W65C02S_OPER_CPY) /* CPY abs */\
+W65C02S_OPCODE(0xCD, ABSOLUTE,                  W65C02S_OPER_CMP) /* CMP abs */\
+W65C02S_OPCODE(0xCE, RMW_ABSOLUTE,              W65C02S_OPER_DEC) /* DEC wab */\
+W65C02S_OPCODE(0xCF, RELATIVE_BIT,              014)              /* 014 rlb */\
+W65C02S_OPCODE(0xD0, RELATIVE,                  W65C02S_OPER_BNE) /* BNE rel */\
+W65C02S_OPCODE(0xD1, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_CMP) /* CMP ziy */\
+W65C02S_OPCODE(0xD2, ZEROPAGE_INDIRECT,         W65C02S_OPER_CMP) /* CMP zpi */\
+W65C02S_OPCODE(0xD3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xD4, ZEROPAGE_X,                W65C02S_OPER_NOP) /* NOP zpx */\
+W65C02S_OPCODE(0xD5, ZEROPAGE_X,                W65C02S_OPER_CMP) /* CMP zpx */\
+W65C02S_OPCODE(0xD6, RMW_ZEROPAGE_X,            W65C02S_OPER_DEC) /* DEC wzx */\
+W65C02S_OPCODE(0xD7, ZEROPAGE_BIT,              015)              /* 015 zpb */\
+W65C02S_OPCODE(0xD8, IMPLIED,                   W65C02S_OPER_CLD) /* CLD imp */\
+W65C02S_OPCODE(0xD9, ABSOLUTE_Y,                W65C02S_OPER_CMP) /* CMP aby */\
+W65C02S_OPCODE(0xDA, STACK_PUSH,                W65C02S_OPER_PHX) /* PHX phv */\
+W65C02S_OPCODE(0xDB, INT_WAIT_STOP,             W65C02S_OPER_STP) /* STP wai */\
+W65C02S_OPCODE(0xDC, ABSOLUTE,                  W65C02S_OPER_NOP) /* NOP abs */\
+W65C02S_OPCODE(0xDD, ABSOLUTE_X,                W65C02S_OPER_CMP) /* CMP abx */\
+W65C02S_OPCODE(0xDE, RMW_ABSOLUTE_X,            W65C02S_OPER_DEC) /* DEC wax */\
+W65C02S_OPCODE(0xDF, RELATIVE_BIT,              015)              /* 015 rlb */\
+W65C02S_OPCODE(0xE0, IMMEDIATE,                 W65C02S_OPER_CPX) /* CPX imm */\
+W65C02S_OPCODE(0xE1, ZEROPAGE_INDIRECT_X,       W65C02S_OPER_SBC) /* SBC zix */\
+W65C02S_OPCODE(0xE2, IMMEDIATE,                 W65C02S_OPER_NOP) /* NOP imm */\
+W65C02S_OPCODE(0xE3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xE4, ZEROPAGE,                  W65C02S_OPER_CPX) /* CPX zpg */\
+W65C02S_OPCODE(0xE5, ZEROPAGE,                  W65C02S_OPER_SBC) /* SBC zpg */\
+W65C02S_OPCODE(0xE6, RMW_ZEROPAGE,              W65C02S_OPER_INC) /* INC wzp */\
+W65C02S_OPCODE(0xE7, ZEROPAGE_BIT,              016)              /* 016 zpb */\
+W65C02S_OPCODE(0xE8, IMPLIED_X,                 W65C02S_OPER_INC) /* INC imx */\
+W65C02S_OPCODE(0xE9, IMMEDIATE,                 W65C02S_OPER_SBC) /* SBC imm */\
+W65C02S_OPCODE(0xEA, IMPLIED,                   W65C02S_OPER_NOP) /* NOP imp */\
+W65C02S_OPCODE(0xEB, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xEC, ABSOLUTE,                  W65C02S_OPER_CPX) /* CPX abs */\
+W65C02S_OPCODE(0xED, ABSOLUTE,                  W65C02S_OPER_SBC) /* SBC abs */\
+W65C02S_OPCODE(0xEE, RMW_ABSOLUTE,              W65C02S_OPER_INC) /* INC wab */\
+W65C02S_OPCODE(0xEF, RELATIVE_BIT,              016)              /* 016 rlb */\
+W65C02S_OPCODE(0xF0, RELATIVE,                  W65C02S_OPER_BEQ) /* BEQ rel */\
+W65C02S_OPCODE(0xF1, ZEROPAGE_INDIRECT_Y,       W65C02S_OPER_SBC) /* SBC ziy */\
+W65C02S_OPCODE(0xF2, ZEROPAGE_INDIRECT,         W65C02S_OPER_SBC) /* SBC zpi */\
+W65C02S_OPCODE(0xF3, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xF4, ZEROPAGE_X,                W65C02S_OPER_NOP) /* NOP zpx */\
+W65C02S_OPCODE(0xF5, ZEROPAGE_X,                W65C02S_OPER_SBC) /* SBC zpx */\
+W65C02S_OPCODE(0xF6, RMW_ZEROPAGE_X,            W65C02S_OPER_INC) /* INC wzx */\
+W65C02S_OPCODE(0xF7, ZEROPAGE_BIT,              017)              /* 017 zpb */\
+W65C02S_OPCODE(0xF8, IMPLIED,                   W65C02S_OPER_SED) /* SED imp */\
+W65C02S_OPCODE(0xF9, ABSOLUTE_Y,                W65C02S_OPER_SBC) /* SBC aby */\
+W65C02S_OPCODE(0xFA, STACK_PULL,                W65C02S_OPER_PLX) /* PLX plv */\
+W65C02S_OPCODE(0xFB, IMPLIED_1C,                W65C02S_OPER_NOP) /* NOP im1 */\
+W65C02S_OPCODE(0xFC, ABSOLUTE,                  W65C02S_OPER_NOP) /* NOP abs */\
+W65C02S_OPCODE(0xFD, ABSOLUTE_X,                W65C02S_OPER_SBC) /* SBC abx */\
+W65C02S_OPCODE(0xFE, RMW_ABSOLUTE_X,            W65C02S_OPER_INC) /* INC wax */\
+W65C02S_OPCODE(0xFF, RELATIVE_BIT,              017)              /* 017 rlb */
+
+
+#if !W65C02S_COARSE
+static void w65c02s_prerun_mode(struct w65c02s_cpu *cpu, uint8_t ir) {
+    unsigned mode;
+
+    switch (ir) {
+        default: W65C02S_UNREACHABLE();
+#define W65C02S_OPCODE(opcode, o_mode, o_oper)                                 \
+        case opcode: mode = W65C02S_MODE_ ## o_mode; break;
+W65C02S_OPCODE_TABLE()
+#undef W65C02S_OPCODE
+    }
+
+    switch (mode) {
     /* these are all the two-cycle addressing modes.
        latch interrupts on the cycle after reading the opcode */
     case W65C02S_MODE_IMPLIED:
@@ -2318,309 +2605,24 @@ static void w65c02s_prerun_mode(struct w65c02s_cpu *cpu) {
         w65c02s_irq_latch(cpu);
     }
 }
+#endif
 
 /* COARSE=0: return true if there is still more to run, false if not */
 /* COARSE=1: return number of cycles */
 #if W65C02S_COARSE
-static unsigned w65c02s_run_mode(struct w65c02s_cpu *cpu)
+static unsigned w65c02s_run_op(struct w65c02s_cpu *cpu, uint8_t ir)
 #else
-static unsigned w65c02s_run_mode(struct w65c02s_cpu *cpu, bool cont)
+static unsigned w65c02s_run_op(struct w65c02s_cpu *cpu, uint8_t ir, bool cont)
 #endif
                                                                      {
-    switch (cpu->mode) {
-    case W65C02S_MODE_RMW_ZEROPAGE:        W65C02S_GO_MODE(rmw_zeropage);
-    case W65C02S_MODE_RMW_ZEROPAGE_X:      W65C02S_GO_MODE(rmw_zeropage_x);
-    case W65C02S_MODE_RMW_ABSOLUTE:        W65C02S_GO_MODE(rmw_absolute);
-    case W65C02S_MODE_RMW_ABSOLUTE_X:      W65C02S_GO_MODE(rmw_absolute_x);
-    case W65C02S_MODE_STACK_PUSH:          W65C02S_GO_MODE(stack_push);
-    case W65C02S_MODE_STACK_PULL:          W65C02S_GO_MODE(stack_pull);
-    case W65C02S_MODE_IMPLIED_1C:          W65C02S_GO_MODE(implied_1c);
-    case W65C02S_MODE_IMPLIED_X:           W65C02S_GO_MODE(implied_x);
-    case W65C02S_MODE_IMPLIED_Y:           W65C02S_GO_MODE(implied_y);
-    case W65C02S_MODE_IMPLIED:             W65C02S_GO_MODE(implied);
-    case W65C02S_MODE_IMMEDIATE:           W65C02S_GO_MODE(immediate);
-    case W65C02S_MODE_ZEROPAGE:            W65C02S_GO_MODE(zeropage);
-    case W65C02S_MODE_ABSOLUTE:            W65C02S_GO_MODE(absolute);
-    case W65C02S_MODE_ZEROPAGE_X:          W65C02S_GO_MODE(zeropage_x);
-    case W65C02S_MODE_ZEROPAGE_Y:          W65C02S_GO_MODE(zeropage_y);
-    case W65C02S_MODE_ABSOLUTE_X:          W65C02S_GO_MODE(absolute_x);
-    case W65C02S_MODE_ABSOLUTE_Y:          W65C02S_GO_MODE(absolute_y);
-    case W65C02S_MODE_ZEROPAGE_INDIRECT:   W65C02S_GO_MODE(zeropage_indirect);
-    case W65C02S_MODE_ZEROPAGE_INDIRECT_X: W65C02S_GO_MODE(zeropage_indirect_x);
-    case W65C02S_MODE_ZEROPAGE_INDIRECT_Y: W65C02S_GO_MODE(zeropage_indirect_y);
-    case W65C02S_MODE_ABSOLUTE_JUMP:       W65C02S_GO_MODE(jump_absolute);
-    case W65C02S_MODE_ABSOLUTE_INDIRECT:   W65C02S_GO_MODE(jump_indirect);
-    case W65C02S_MODE_ABSOLUTE_INDIRECT_X: W65C02S_GO_MODE(jump_indirect_x);
-    case W65C02S_MODE_SUBROUTINE:          W65C02S_GO_MODE(subroutine);
-    case W65C02S_MODE_RETURN_SUB:          W65C02S_GO_MODE(return_sub);
-    case W65C02S_MODE_STACK_BRK:           W65C02S_GO_MODE(stack_brk);
-    case W65C02S_MODE_STACK_RTI:           W65C02S_GO_MODE(stack_rti);
-    case W65C02S_MODE_RELATIVE:            W65C02S_GO_MODE(relative);
-    case W65C02S_MODE_RELATIVE_BIT:        W65C02S_GO_MODE(relative_bit);
-    case W65C02S_MODE_ZEROPAGE_BIT:        W65C02S_GO_MODE(zeropage_bit);
-    case W65C02S_MODE_INT_WAIT_STOP:       W65C02S_GO_MODE(int_wait_stop);
-    case W65C02S_MODE_NOP_5C:              W65C02S_GO_MODE(nop_5c);
-    case W65C02S_MODE_ABSOLUTE_X_STORE:
-        W65C02S_GO_MODE(absolute_x_store);
-    case W65C02S_MODE_ABSOLUTE_Y_STORE:
-        W65C02S_GO_MODE(absolute_y_store);
-    case W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE:
-        W65C02S_GO_MODE(zeropage_indirect_y_store);
+    switch (ir) {
+#define W65C02S_OPCODE(opcode, o_mode, o_oper)                                 \
+        case opcode: W65C02S_GO_MODE(o_mode, o_oper);
+W65C02S_OPCODE_TABLE()
+#undef W65C02S_OPCODE
     }
     W65C02S_UNREACHABLE();
     return 0;
-}
-
-
-
-/* +------------------------------------------------------------------------+ */
-/* |                                                                        | */
-/* |                         INSTRUCTION  DECODING                          | */
-/* |                                                                        | */
-/* +------------------------------------------------------------------------+ */
-
-
-
-/*             0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F  
-      00:0F   brk zix imm im1 wzp zpg wzp zpb phv imm imp im1 wab abs wab rlb 
-      10:1F   rel ziy zpi im1 wzp zpx wzx zpb imp aby imp im1 wab abx wax rlb 
-      20:2F   sbj zix imm im1 zpg zpg wzp zpb plv imm imp im1 abs abs wab rlb 
-      30:3F   rel ziy zpi im1 zpx zpx wzx zpb imp aby imp im1 abx abx wax rlb 
-      40:4F   rti zix imm im1 zpg zpg wzp zpb phv imm imp im1 abj abs wab rlb 
-      50:5F   rel ziy zpi im1 zpx zpx wzx zpb imp aby phv im1 x5c abx wax rlb 
-      60:6F   sbr zix imm im1 zpg zpg wzp zpb plv imm imp im1 ind abs wab rlb 
-      70:7F   rel ziy zpi im1 zpx zpx wzx zpb imp aby plv im1 idx abx wax rlb 
-      80:8F   rel zix imm im1 zpg zpg zpg zpb imy imm imp im1 abs abs abs rlb 
-      90:9F   rel ziy zpi im1 zpx zpx zpy zpb imp aby imp im1 abs abx abx rlb 
-      A0:AF   imm zix imm im1 zpg zpg zpg zpb imp imm imp im1 abs abs abs rlb 
-      B0:BF   rel ziy zpi im1 zpx zpx zpy zpb imp aby imp im1 abx abx aby rlb 
-      C0:CF   imm zix imm im1 zpg zpg wzp zpb imy imm imx wai abs abs wab rlb 
-      D0:DF   rel ziy zpi im1 zpx zpx wzx zpb imp aby phv wai abs abx wax rlb 
-      E0:EF   imm zix imm im1 zpg zpg wzp zpb imx imm imp im1 abs abs wab rlb 
-      F0:FF   rel ziy zpi im1 zpx zpx wzx zpb imp aby plv im1 abs abx wax rlb 
-*/
-
-W65C02S_ALIGNAS(256) static const W65C02S_LOOKUP_TYPE w65c02s_modes[256] = {
-    W65C02S_MODE_STACK_BRK,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_STACK_PUSH,          W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_SUBROUTINE,          W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_STACK_PULL,          W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE_X,          W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_STACK_RTI,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_STACK_PUSH,          W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE_JUMP,       W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_STACK_PUSH,          W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_NOP_5C,              W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RETURN_SUB,          W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_STACK_PULL,          W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE_INDIRECT,   W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_STACK_PULL,          W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE_INDIRECT_X, W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED_Y,           W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y_STORE, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_ZEROPAGE_Y,          W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y_STORE,          
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE_X_STORE,          
-    W65C02S_MODE_ABSOLUTE_X_STORE,    W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_ZEROPAGE_Y,          W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE_X,          W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_ABSOLUTE_Y,          W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED_Y,           W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED_X,           W65C02S_MODE_INT_WAIT_STOP,       
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_STACK_PUSH,          W65C02S_MODE_INT_WAIT_STOP,       
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_ZEROPAGE_INDIRECT_X, 
-    W65C02S_MODE_IMMEDIATE,           W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE,            W65C02S_MODE_ZEROPAGE,            
-    W65C02S_MODE_RMW_ZEROPAGE,        W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED_X,           W65C02S_MODE_IMMEDIATE,           
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE,            
-    W65C02S_MODE_RMW_ABSOLUTE,        W65C02S_MODE_RELATIVE_BIT,        
-    W65C02S_MODE_RELATIVE,            W65C02S_MODE_ZEROPAGE_INDIRECT_Y, 
-    W65C02S_MODE_ZEROPAGE_INDIRECT,   W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ZEROPAGE_X,          W65C02S_MODE_ZEROPAGE_X,          
-    W65C02S_MODE_RMW_ZEROPAGE_X,      W65C02S_MODE_ZEROPAGE_BIT,        
-    W65C02S_MODE_IMPLIED,             W65C02S_MODE_ABSOLUTE_Y,          
-    W65C02S_MODE_STACK_PULL,          W65C02S_MODE_IMPLIED_1C,          
-    W65C02S_MODE_ABSOLUTE,            W65C02S_MODE_ABSOLUTE_X,          
-    W65C02S_MODE_RMW_ABSOLUTE_X,      W65C02S_MODE_RELATIVE_BIT,        
-};
-
-/*
-               0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F 
-      00:0F   BRK ORA NOP NOP TSB ORA ASL 000 PHP ORA ASL NOP TSB ORA ASL 000 
-      10:1F   BPL ORA ORA NOP TRB ORA ASL 001 CLC ORA INC NOP TRB ORA ASL 001 
-      20:2F   JSR AND NOP NOP BIT AND ROL 002 PLP AND ROL NOP BIT AND ROL 002 
-      30:3F   BMI AND AND NOP BIT AND ROL 003 SEC AND DEC NOP BIT AND ROL 003 
-      40:4F   RTI EOR NOP NOP NOP EOR LSR 004 PHA EOR LSR NOP JMP EOR LSR 004 
-      50:5F   BVC EOR EOR NOP NOP EOR LSR 005 CLI EOR PHY NOP NOP EOR LSR 005 
-      60:6F   RTS ADC NOP NOP STZ ADC ROR 006 PLA ADC ROR NOP JMP ADC ROR 006 
-      70:7F   BVS ADC ADC NOP STZ ADC ROR 007 SEI ADC PLY NOP JMP ADC ROR 007 
-      80:8F   BRA STA NOP NOP STY STA STX 010 DEC BIT TXA NOP STY STA STX 010 
-      90:9F   BCC STA STA NOP STY STA STX 011 TYA STA TXS NOP STZ STA STZ 011 
-      A0:AF   LDY LDA LDX NOP LDY LDA LDX 012 TAY LDA TAX NOP LDY LDA LDX 012 
-      B0:BF   BCS LDA LDA NOP LDY LDA LDX 013 CLV LDA TSX NOP LDY LDA LDX 013 
-      C0:CF   CPY CMP NOP NOP CPY CMP DEC 014 INC CMP DEC WAI CPY CMP DEC 014 
-      D0:DF   BNE CMP CMP NOP NOP CMP DEC 015 CLD CMP PHX STP NOP CMP DEC 015 
-      E0:EF   CPX SBC NOP NOP CPX SBC INC 016 INC SBC NOP NOP CPX SBC INC 016 
-      F0:FF   BEQ SBC SBC NOP NOP SBC INC 017 SED SBC PLX NOP NOP SBC INC 017 
-*/
-
-W65C02S_ALIGNAS(256) static const W65C02S_LOOKUP_TYPE w65c02s_opers[256] = {
-    W65C02S_OPER_BRK, W65C02S_OPER_ORA, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_TSB, W65C02S_OPER_ORA, W65C02S_OPER_ASL, 000,
-    W65C02S_OPER_PHP, W65C02S_OPER_ORA, W65C02S_OPER_ASL, W65C02S_OPER_NOP,
-    W65C02S_OPER_TSB, W65C02S_OPER_ORA, W65C02S_OPER_ASL, 000,
-    W65C02S_OPER_BPL, W65C02S_OPER_ORA, W65C02S_OPER_ORA, W65C02S_OPER_NOP,
-    W65C02S_OPER_TRB, W65C02S_OPER_ORA, W65C02S_OPER_ASL, 001,
-    W65C02S_OPER_CLC, W65C02S_OPER_ORA, W65C02S_OPER_INC, W65C02S_OPER_NOP,
-    W65C02S_OPER_TRB, W65C02S_OPER_ORA, W65C02S_OPER_ASL, 001,
-    W65C02S_OPER_JSR, W65C02S_OPER_AND, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_BIT, W65C02S_OPER_AND, W65C02S_OPER_ROL, 002,
-    W65C02S_OPER_PLP, W65C02S_OPER_AND, W65C02S_OPER_ROL, W65C02S_OPER_NOP,
-    W65C02S_OPER_BIT, W65C02S_OPER_AND, W65C02S_OPER_ROL, 002,
-    W65C02S_OPER_BMI, W65C02S_OPER_AND, W65C02S_OPER_AND, W65C02S_OPER_NOP,
-    W65C02S_OPER_BIT, W65C02S_OPER_AND, W65C02S_OPER_ROL, 003,
-    W65C02S_OPER_SEC, W65C02S_OPER_AND, W65C02S_OPER_DEC, W65C02S_OPER_NOP,
-    W65C02S_OPER_BIT, W65C02S_OPER_AND, W65C02S_OPER_ROL, 003,
-    W65C02S_OPER_RTI, W65C02S_OPER_EOR, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_EOR, W65C02S_OPER_LSR, 004,
-    W65C02S_OPER_PHA, W65C02S_OPER_EOR, W65C02S_OPER_LSR, W65C02S_OPER_NOP,
-    W65C02S_OPER_JMP, W65C02S_OPER_EOR, W65C02S_OPER_LSR, 004,
-    W65C02S_OPER_BVC, W65C02S_OPER_EOR, W65C02S_OPER_EOR, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_EOR, W65C02S_OPER_LSR, 005,
-    W65C02S_OPER_CLI, W65C02S_OPER_EOR, W65C02S_OPER_PHY, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_EOR, W65C02S_OPER_LSR, 005,
-    W65C02S_OPER_RTS, W65C02S_OPER_ADC, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_STZ, W65C02S_OPER_ADC, W65C02S_OPER_ROR, 006,
-    W65C02S_OPER_PLA, W65C02S_OPER_ADC, W65C02S_OPER_ROR, W65C02S_OPER_NOP,
-    W65C02S_OPER_JMP, W65C02S_OPER_ADC, W65C02S_OPER_ROR, 006,
-    W65C02S_OPER_BVS, W65C02S_OPER_ADC, W65C02S_OPER_ADC, W65C02S_OPER_NOP,
-    W65C02S_OPER_STZ, W65C02S_OPER_ADC, W65C02S_OPER_ROR, 007,
-    W65C02S_OPER_SEI, W65C02S_OPER_ADC, W65C02S_OPER_PLY, W65C02S_OPER_NOP,
-    W65C02S_OPER_JMP, W65C02S_OPER_ADC, W65C02S_OPER_ROR, 007,
-    W65C02S_OPER_BRA, W65C02S_OPER_STA, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_STY, W65C02S_OPER_STA, W65C02S_OPER_STX, 010,
-    W65C02S_OPER_DEC, W65C02S_OPER_BIT, W65C02S_OPER_TXA, W65C02S_OPER_NOP,
-    W65C02S_OPER_STY, W65C02S_OPER_STA, W65C02S_OPER_STX, 010,
-    W65C02S_OPER_BCC, W65C02S_OPER_STA, W65C02S_OPER_STA, W65C02S_OPER_NOP,
-    W65C02S_OPER_STY, W65C02S_OPER_STA, W65C02S_OPER_STX, 011,
-    W65C02S_OPER_TYA, W65C02S_OPER_STA, W65C02S_OPER_TXS, W65C02S_OPER_NOP,
-    W65C02S_OPER_STZ, W65C02S_OPER_STA, W65C02S_OPER_STZ, 011,
-    W65C02S_OPER_LDY, W65C02S_OPER_LDA, W65C02S_OPER_LDX, W65C02S_OPER_NOP,
-    W65C02S_OPER_LDY, W65C02S_OPER_LDA, W65C02S_OPER_LDX, 012,
-    W65C02S_OPER_TAY, W65C02S_OPER_LDA, W65C02S_OPER_TAX, W65C02S_OPER_NOP,
-    W65C02S_OPER_LDY, W65C02S_OPER_LDA, W65C02S_OPER_LDX, 012,
-    W65C02S_OPER_BCS, W65C02S_OPER_LDA, W65C02S_OPER_LDA, W65C02S_OPER_NOP,
-    W65C02S_OPER_LDY, W65C02S_OPER_LDA, W65C02S_OPER_LDX, 013,
-    W65C02S_OPER_CLV, W65C02S_OPER_LDA, W65C02S_OPER_TSX, W65C02S_OPER_NOP,
-    W65C02S_OPER_LDY, W65C02S_OPER_LDA, W65C02S_OPER_LDX, 013,
-    W65C02S_OPER_CPY, W65C02S_OPER_CMP, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_CPY, W65C02S_OPER_CMP, W65C02S_OPER_DEC, 014,
-    W65C02S_OPER_INC, W65C02S_OPER_CMP, W65C02S_OPER_DEC, W65C02S_OPER_WAI,
-    W65C02S_OPER_CPY, W65C02S_OPER_CMP, W65C02S_OPER_DEC, 014,
-    W65C02S_OPER_BNE, W65C02S_OPER_CMP, W65C02S_OPER_CMP, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_CMP, W65C02S_OPER_DEC, 015,
-    W65C02S_OPER_CLD, W65C02S_OPER_CMP, W65C02S_OPER_PHX, W65C02S_OPER_STP,
-    W65C02S_OPER_NOP, W65C02S_OPER_CMP, W65C02S_OPER_DEC, 015,
-    W65C02S_OPER_CPX, W65C02S_OPER_SBC, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_CPX, W65C02S_OPER_SBC, W65C02S_OPER_INC, 016,
-    W65C02S_OPER_INC, W65C02S_OPER_SBC, W65C02S_OPER_NOP, W65C02S_OPER_NOP,
-    W65C02S_OPER_CPX, W65C02S_OPER_SBC, W65C02S_OPER_INC, 016,
-    W65C02S_OPER_BEQ, W65C02S_OPER_SBC, W65C02S_OPER_SBC, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_SBC, W65C02S_OPER_INC, 017,
-    W65C02S_OPER_SED, W65C02S_OPER_SBC, W65C02S_OPER_PLX, W65C02S_OPER_NOP,
-    W65C02S_OPER_NOP, W65C02S_OPER_SBC, W65C02S_OPER_INC, 017,
-};
-
-W65C02S_INLINE void w65c02s_decode(struct w65c02s_cpu *cpu, uint8_t ir) {
-    cpu->mode = w65c02s_modes[ir];
-    cpu->oper = w65c02s_opers[ir]; 
 }
 
 
@@ -2633,7 +2635,7 @@ W65C02S_INLINE void w65c02s_decode(struct w65c02s_cpu *cpu, uint8_t ir) {
 
 
 
-W65C02S_INLINE void w65c02s_handle_reset(struct w65c02s_cpu *cpu) {
+static void w65c02s_handle_reset(struct w65c02s_cpu *cpu) {
     uint8_t p = cpu->p;
     /* do RESET */
     cpu->in_rst = true;
@@ -2647,13 +2649,13 @@ W65C02S_INLINE void w65c02s_handle_reset(struct w65c02s_cpu *cpu) {
     cpu->p = p;
 }
 
-W65C02S_INLINE void w65c02s_handle_nmi(struct w65c02s_cpu *cpu) {
+static void w65c02s_handle_nmi(struct w65c02s_cpu *cpu) {
     cpu->in_nmi = true;
     cpu->int_trig &= ~W65C02S_CPU_STATE_NMI;
     W65C02S_CPU_STATE_CLEAR_NMI(cpu);
 }
 
-W65C02S_INLINE void w65c02s_handle_irq(struct w65c02s_cpu *cpu) {
+static void w65c02s_handle_irq(struct w65c02s_cpu *cpu) {
     cpu->in_irq = true;
     W65C02S_CPU_STATE_CLEAR_IRQ(cpu);
 }
@@ -2668,7 +2670,6 @@ W65C02S_INLINE bool w65c02s_handle_interrupt(struct w65c02s_cpu *cpu) {
     else
         return false;
     W65C02S_READ(cpu->pc); /* stall for a cycle */
-    w65c02s_decode(cpu, 0); /* force BRK ($00) to handle interrupt */
     return true;
 }
 
@@ -2741,11 +2742,13 @@ static bool w65c02s_handle_stp_wai_c(struct w65c02s_cpu *cpu) {
 
 static unsigned long w65c02s_execute_c(struct w65c02s_cpu *cpu,
                                        unsigned long maximum_cycles) {
+    uint8_t ir;
     cpu->maximum_cycles = maximum_cycles;
     cpu->target_cycles = cpu->total_cycles + maximum_cycles;
     if (cpu->cycl) {
         /* continue running instruction */
-        if (w65c02s_run_mode(cpu, W65C02S_CONTINUE_INSTRUCTION)) {
+        ir = cpu->ir;
+        if (w65c02s_run_op(cpu, ir, W65C02S_CONTINUE_INSTRUCTION)) {
             maximum_cycles = cpu->maximum_cycles;
             if (cpu->cycl) cpu->cycl += maximum_cycles;
             return maximum_cycles;
@@ -2754,27 +2757,30 @@ static unsigned long w65c02s_execute_c(struct w65c02s_cpu *cpu,
     }
 
     /* new instruction, handle special states now */
-    if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN))
+    if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN)) {
+        ir = cpu->ir;
         goto check_special_state;
+    }
 
     for (;;) {
         unsigned long cyclecount;
-
-        w65c02s_decode(cpu, W65C02S_READ(cpu->pc++));
-        w65c02s_prerun_mode(cpu);
+        ir = W65C02S_READ(cpu->pc++);
 
 decoded:
         cpu->cycl = 0;
         cyclecount = cpu->total_cycles;
         if (W65C02S_UNLIKELY(W65C02S_CYCLE_CONDITION)) {
             cpu->cycl = 1; /* stopped after decoding, continue from there */
+            w65c02s_prerun_mode(cpu, ir);
+            cpu->ir = ir;
             return cpu->maximum_cycles;
         }
 
-        if (W65C02S_UNLIKELY(w65c02s_run_mode(cpu,
+        if (W65C02S_UNLIKELY(w65c02s_run_op(cpu, ir,
                              W65C02S_STARTING_INSTRUCTION))) {
             if (cpu->cycl) {
                 cpu->cycl += cpu->total_cycles - cyclecount;
+                cpu->ir = ir;
             } else {
                 w65c02s_handle_end_of_instruction(cpu);
             }
@@ -2787,47 +2793,56 @@ end_of_instruction:
         w65c02s_handle_end_of_instruction(cpu);
         if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN)) {
 check_special_state:
-            if (w65c02s_handle_break(cpu) || w65c02s_handle_stp_wai_c(cpu))
+            if (w65c02s_handle_break(cpu) || w65c02s_handle_stp_wai_c(cpu)) {
+                cpu->ir = ir;
                 return W65C02S_CYCLES_NOW;
-            if (w65c02s_handle_interrupt(cpu)) goto decoded;
+            }
+            if (w65c02s_handle_interrupt(cpu)) {
+                ir = 0; /* force BRK ($00) to handle interrupt */
+                goto decoded;
+            }
         }
     }
 }
 
-W65C02S_INLINE unsigned w65c02s_run_mode_c(struct w65c02s_cpu *cpu,
+W65C02S_INLINE unsigned w65c02s_run_op_c(struct w65c02s_cpu *cpu, uint8_t ir,
                                            bool cont) {
     cpu->target_cycles = cpu->total_cycles - (cont ? 0 : 1);
-    w65c02s_run_mode(cpu, cont);
+    w65c02s_run_op(cpu, ir, cont);
     return cpu->total_cycles - cpu->target_cycles;
 }
 
 static unsigned long w65c02s_execute_ic(struct w65c02s_cpu *cpu) {
     unsigned cycles;
-    cycles = w65c02s_run_mode_c(cpu, W65C02S_CONTINUE_INSTRUCTION);
+    cycles = w65c02s_run_op_c(cpu, cpu->ir, W65C02S_CONTINUE_INSTRUCTION);
     w65c02s_handle_end_of_instruction(cpu);
     return cycles;
 }
 
 #endif /* W65C02S_COARSE */
 
-W65C02S_INLINE unsigned long w65c02s_execute_ii(struct w65c02s_cpu *cpu) {
+static unsigned long w65c02s_execute_ii(struct w65c02s_cpu *cpu) {
     unsigned cycles;
+    uint8_t ir;
+
     if (W65C02S_UNLIKELY(cpu->cpu_state != W65C02S_CPU_STATE_RUN)) {
         if (w65c02s_handle_break(cpu)) return 0;
         if (w65c02s_handle_stp_wai_i(cpu)) return 1;
-        if (w65c02s_handle_interrupt(cpu)) goto decoded;
+        if (w65c02s_handle_interrupt(cpu)) {
+            ir = 0; /* force BRK ($00) to handle interrupt */
+            goto decoded;
+        }
     }
 
-    w65c02s_decode(cpu, W65C02S_READ(cpu->pc++));    
+    ir = W65C02S_READ(cpu->pc++);
 decoded:
-    w65c02s_prerun_mode(cpu);
     W65C02S_SPENT_CYCLE;
 
 #if !W65C02S_COARSE
     cpu->cycl = 1; /* make sure we start at the first cycle */
-    cycles = w65c02s_run_mode_c(cpu, W65C02S_STARTING_INSTRUCTION);
+    cycles = w65c02s_run_op_c(cpu, ir, W65C02S_STARTING_INSTRUCTION);
 #else
-    cycles = w65c02s_run_mode(cpu);
+    cycles = w65c02s_run_op(cpu, ir);
 #endif
     w65c02s_handle_end_of_instruction(cpu);
     W65C02S_ASSUME(cycles > 0);
