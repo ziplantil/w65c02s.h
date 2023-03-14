@@ -2119,7 +2119,7 @@ W65C02S_INLINE unsigned w65c02s_mode_STACK_PUSH(W65C02S_PARAMS_MODE) {
                 case W65C02S_OPER_PHA: tmp = cpu->a; break;
                 case W65C02S_OPER_PHX: tmp = cpu->x; break;
                 case W65C02S_OPER_PHY: tmp = cpu->y; break;
-                default: W65C02S_UNREACHABLE();
+                default: tmp = 0; W65C02S_UNREACHABLE();
             }
             w65c02s_stack_push(cpu, tmp);
         }
