@@ -1,8 +1,8 @@
 /*******************************************************************************
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
-            by ziplantil 2022 -- under the CC0 license
-            version: 2022-11-05
+            by ziplantil 2022-2023 -- under the CC0 license
+            version: 2023-03-14
             please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
 
@@ -303,6 +303,24 @@ bool w65c02s_is_cpu_stopped(const struct w65c02s_cpu *cpu);
  *  [Parameter: cpu] The CPU instance
  */
 void w65c02s_break(struct w65c02s_cpu *cpu);
+
+/** w65c02s_stall
+ *
+ *  Stalls the CPU stall for the given number of cycles. This feature is
+ *  intended for use with e.g. memory accesses that require additional cycles
+ *  (which, on a real chip, would generally work by pulling RDY low).
+ *
+ *  The stall cycles will run at the beginning of the next w65c02s_run_cycles
+ *  or w65c02s_run_instructions. w65c02s_stall will automatically call
+ *  w65c02s_break to break execution if any is running.
+ *
+ *  This function is designed to be called from callbacks (e.g. memory access
+ *  or end of instruction).
+ *
+ *  [Parameter: cpu] The CPU instance
+ *  [Parameter: cycles] The number of cycles to stall
+ */
+void w65c02s_stall(struct w65c02s_cpu *cpu, unsigned long cycles);
 
 /** w65c02s_nmi
  *
@@ -681,10 +699,15 @@ struct w65c02s_cpu {
     uint8_t (*mem_read)(struct w65c02s_cpu *, uint16_t);
     void (*mem_write)(struct w65c02s_cpu *, uint16_t, uint8_t);
 #endif
+
     /* BRK, STP, end of instruction hooks */
     bool (*hook_brk)(uint8_t);
     bool (*hook_stp)(void);
     void (*hook_eoi)(void);
+
+    /* how many cycles we must still stall */
+    unsigned long stall_cycles;
+
     /* data pointer from w65c02s_init */
     void *cpu_data;
 };
@@ -2923,11 +2946,23 @@ void w65c02s_init(struct w65c02s_cpu *cpu,
     cpu->pc = 0xFFFFU;
     cpu->a = cpu->x = cpu->y = cpu->s = cpu->p = 0xFF;
     cpu->cpu_state = W65C02S_CPU_STATE_RESET;
+    cpu->stall_cycles = 0;
 }
 
 unsigned long w65c02s_run_cycles(struct w65c02s_cpu *cpu,
                                  unsigned long cycles) {
     unsigned long c = 0;
+    if (W65C02S_UNLIKELY(cpu->stall_cycles)) {
+        if (cpu->stall_cycles > cycles) {
+            cpu->total_cycles += cycles;
+            cpu->stall_cycles -= cycles;
+            return cycles;
+        } else {
+            cpu->total_cycles += cpu->stall_cycles;
+            cycles -= cpu->stall_cycles;
+            cpu->stall_cycles = 0;
+        }
+    }
     if (W65C02S_UNLIKELY(!cycles)) return 0;
     W65C02S_CPU_STATE_RST_FLAG(cpu, W65C02S_CPU_STATE_BREAK);
 #if W65C02S_COARSE
@@ -2956,9 +2991,14 @@ unsigned long w65c02s_step_instruction(struct w65c02s_cpu *cpu) {
 unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
                                        unsigned long instructions,
                                        bool finish_existing) {
-    unsigned long total_cycles;
+    unsigned long total_cycles, stalled = 0;
     if (W65C02S_UNLIKELY(!instructions)) return 0;
     W65C02S_CPU_STATE_RST_FLAG(cpu, W65C02S_CPU_STATE_BREAK);
+    if (W65C02S_UNLIKELY(cpu->stall_cycles)) {
+        stalled = cpu->stall_cycles;
+        cpu->total_cycles += stalled;
+        cpu->stall_cycles = 0;
+    }
 #if !W65C02S_COARSE
     if (W65C02S_UNLIKELY(cpu->cycl)) {
         total_cycles = w65c02s_execute_ic(cpu);
@@ -2974,17 +3014,22 @@ unsigned long w65c02s_run_instructions(struct w65c02s_cpu *cpu,
 #if !W65C02S_COARSE
     cpu->cycl = 0;
 #endif
-    return total_cycles;
+    return total_cycles + stalled;
 }
 
 void w65c02s_break(struct w65c02s_cpu *cpu) {
 #if !W65C02S_COARSE
     /* also adjust the cycle counters so we stop right away. */
-    unsigned long cycles_skipped = cpu->target_cycles - cpu->total_cycles - 1;
-    cpu->maximum_cycles -= cycles_skipped;
-    cpu->target_cycles = cpu->total_cycles + 1;
+    unsigned long next_cycle = cpu->total_cycles + 1;
+    cpu->maximum_cycles -= cpu->target_cycles - next_cycle;
+    cpu->target_cycles = next_cycle;
 #endif
     W65C02S_CPU_STATE_SET_FLAG(cpu, W65C02S_CPU_STATE_BREAK);
+}
+
+void w65c02s_stall(struct w65c02s_cpu *cpu, unsigned long cycles) {
+    w65c02s_break(cpu);
+    cpu->stall_cycles += cycles;
 }
 
 void w65c02s_nmi(struct w65c02s_cpu *cpu) {

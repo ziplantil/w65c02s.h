@@ -203,6 +203,25 @@ end of instruction).
 
 * **Parameter** `cpu`: The CPU instance
 
+## w65c02s_stall
+Stalls the CPU stall for the given number of cycles. This feature is intended
+for use with e.g. memory accesses that require additional cycles (which, on a
+real chip, would generally work by pulling RDY low).
+
+```c
+void w65c02s_stall(struct w65c02s_cpu *cpu, unsigned long cycles);
+```
+
+The stall cycles will run at the beginning of the next w65c02s_run_cycles or
+w65c02s_run_instructions. w65c02s_stall will automatically call w65c02s_break
+to break execution if any is running.
+
+This function is designed to be called from callbacks (e.g. memory access or
+end of instruction).
+
+* **Parameter** `cpu`: The CPU instance
+* **Parameter** `cycles`: The number of cycles to stall
+
 ## w65c02s_nmi
 Queues a NMI (non-maskable interrupt) on the CPU.
 

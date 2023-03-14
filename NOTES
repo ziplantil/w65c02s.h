@@ -1,4 +1,4 @@
-Notes about w65c02s and its development:
+Notes about w65c02s.h and its development:
 * The RESET/RST behaviour is not completely accurate, but at least the NMOS
   6502 has unpredictable behavior during a reset anyway. It seems to do 2
   spurious reads of PC before the third (first read of RESET), but in addition
@@ -13,3 +13,7 @@ Notes about w65c02s and its development:
 * The case of W65C02S_COARSE=0 could be optimized greatly by eliminating
   the "cont = 0" branch entirely, but that does not seem possible in C89, even
   with compiler extensions.
+* w65c02s_stall is not a perfect match for pulling RDY low. The actual 65C02S
+  would repeat read cycles for the last address, but that is hard to implement
+  efficiently, and the stall would mostly be used in memory access methods
+  anyway (which would require re-entrancy).
