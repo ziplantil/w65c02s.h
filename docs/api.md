@@ -1,3 +1,22 @@
+## w65c02s_cpu_size
+Returns the size of `struct w65c02s_cpu` for allocation purposes.
+
+```c
+size_t w65c02s_cpu_size(void);
+```
+
+struct w65c02s_cpu is an opaque type and its fields should not be accessed
+directly. The intended purpose is to define `W65C20S_IMPL` in one file and then
+use a CPU instance registered in such a file, so that the underlying library is
+not visible to the rest of the code.
+
+However, in some cases, the size of the struct may be required, such a when
+performing dynamic allocation. This function helps with that; it returns the
+space needed by the struct. This value can then be passed to malloc or another
+similar allocator.
+
+* **Return value**: The number of chars needed by the struct
+
 ## w65c02s_init
 Initializes a new CPU instance.
 

@@ -1,8 +1,8 @@
 /*******************************************************************************
             w65c02s.h -- cycle-accurate C emulator of the WDC 65C02S
                          as a single-header library
-            by ziplantil 2022-2023 -- under the CC0 license
-            version: 2023-03-14
+            by ziplantil 2022-2024 -- under the CC0 license
+            version: 2024-08-27
             please report issues to <https://github.com/ziplantil/w65c02s.h>
 *******************************************************************************/
 
@@ -23,7 +23,7 @@ extern "C" {
 #define W65C02S_COARSE 0
 #endif
 
-/* 1: define uint8_t w65c02s_read(uint16_t); 
+/* 1: define uint8_t w65c02s_read(uint16_t);
          and    void w65c02s_write(uint16_t, uint8_t); through linking. */
 /* 0: define them through function pointers passed to w65c02s_init. */
 #ifndef W65C02S_LINK
@@ -50,7 +50,7 @@ extern "C" {
 
 /* 1: has bool without stdbool.h */
 /* 0: does not have bool without stdbool.h */
-#ifndef W65C02S_HAS_BOOL 
+#ifndef W65C02S_HAS_BOOL
 #define W65C02S_HAS_BOOL 0
 #endif
 
@@ -110,7 +110,27 @@ typedef int bool;
 #define W65C02S_ALIGNAS(n)
 #endif
 
+#include <stddef.h>
+
 struct w65c02s_cpu;
+
+/** w65c02s_cpu_size
+ *
+ *  Returns the size of struct w65c02s_cpu for allocation purposes.
+ *
+ *  struct w65c02s_cpu is an opaque type and its fields should not be
+ *  accessed directly. The intended purpose is to define `W65C20S_IMPL` in one
+ *  file and then use a CPU instance registered in such a file, so that the
+ *  underlying library is not visible to the rest of the code.
+ *
+ *  However, in some cases, the size of the struct may be required, such a
+ *  when performing dynamic allocation. This function helps with that;
+ *  it returns the space needed by the struct. This value can then be passed
+ *  to malloc or another similar allocator.
+ *
+ *  [Return value] The number of chars needed by the struct
+ */
+size_t w65c02s_cpu_size(void);
 
 /** w65c02s_init
  *
@@ -373,7 +393,7 @@ void w65c02s_irq(struct w65c02s_cpu *cpu);
  *  disabled from the CPU side.
  *
  *  Generally you would want to hold the IRQ line high and cancel the IRQ
- *  only once it has been acknowledged by the CPU (e.g. through MMIO). 
+ *  only once it has been acknowledged by the CPU (e.g. through MMIO).
  *
  *  [Parameter: cpu] The CPU instance
  */
@@ -831,7 +851,7 @@ struct w65c02s_cpu {
 #define W65C02S_SKIP_TO_NEXT(n)     goto cycle_##n;
 #define W65C02S_BEGIN_INSTRUCTION   unsigned cyc = 1; (void)oper;
 #define W65C02S_CYCLE_END           ++cyc; W65C02S_CYCLE_TOTAL_INC
-#define W65C02S_CYCLE_LABEL_1(n)        
+#define W65C02S_CYCLE_LABEL_1(n)    
 #define W65C02S_CYCLE_LABEL_X(n)    goto cycle_##n; cycle_##n:
 #define W65C02S_END_INSTRUCTION     W65C02S_CYCLE_END                          \
                                 W65C02S_SKIP_REST;
@@ -863,7 +883,7 @@ struct w65c02s_cpu {
                                         W65C02S_CYCLE_CONDITION                \
                                     )) return 1;
 #define W65C02S_CYCLE_END_LAST      cpu->cycl = 0; W65C02S_CYCLE_END
-                              
+
 #define W65C02S_CYCLE_LABEL_1(n)    cycle_##n: case n:
 #define W65C02S_CYCLE_LABEL_X(n)    goto cycle_##n; cycle_##n: case n:
 #define W65C02S_END_INSTRUCTION     W65C02S_CYCLE_END_LAST                     \
@@ -1198,7 +1218,7 @@ static uint8_t w65c02s_oper_sbc_d(struct w65c02s_cpu *cpu,
     /* BCD subtraction one nibble/digit at a time */
     unsigned lo, hi, hc, fc, q;
     uint8_t p_adj;
-    
+
     lo = (a & 15) + (b & 15) + c;       /* subtract low nibbles */
     hc = lo >= 16;                      /* half carry */
     lo = (hc ? lo : 10 + lo) & 15;      /* adjust result on half carry set */
@@ -1208,7 +1228,7 @@ static uint8_t w65c02s_oper_sbc_d(struct w65c02s_cpu *cpu,
     hi = (fc ? hi : 10 + hi) & 15;      /* adjust result on full carry set */
 
     q = (hi << 4) | lo;                 /* build result */
-    
+
     p_adj = fc ? W65C02S_P_C : 0;
     W65C02S_SET_P(cpu->p, W65C02S_P_C, fc);
     W65C02S_SET_P(p_adj, W65C02S_P_N, q >> 7);
@@ -1341,7 +1361,7 @@ W65C02S_INLINE uint8_t w65c02s_stack_pull(struct w65c02s_cpu *cpu) {
     return W65C02S_READ(s);
 }
 
-/* update interrupt mask, which is ~P_I if IRQs are disabled and else ~0. 
+/* update interrupt mask, which is ~P_I if IRQs are disabled and else ~0.
    to be called whenever the I flag changes in P. */
 W65C02S_INLINE void w65c02s_irq_update_mask(struct w65c02s_cpu *cpu) {
     /* note: W65C02S_CPU_STATE_IRQ == P_I */
@@ -1416,7 +1436,7 @@ W65C02S_INLINE bool w65c02s_oper_imm(struct w65c02s_cpu *cpu,
         case W65C02S_OPER_CPX: w65c02s_oper_cmp(cpu, cpu->x, v);     break;
         case W65C02S_OPER_CPY: w65c02s_oper_cmp(cpu, cpu->y, v);     break;
         case W65C02S_OPER_BIT: w65c02s_oper_bit_imm(cpu, v);         break;
-        
+
         case W65C02S_OPER_LDA: cpu->a = w65c02s_mark_nz(cpu, v);     break;
         case W65C02S_OPER_LDX: cpu->x = w65c02s_mark_nz(cpu, v);     break;
         case W65C02S_OPER_LDY: cpu->y = w65c02s_mark_nz(cpu, v);     break;
@@ -2909,6 +2929,10 @@ static unsigned long w65c02s_execute_im(struct w65c02s_cpu *cpu,
 /* +------------------------------------------------------------------------+ */
 
 
+
+size_t w65c02s_cpu_size(void) {
+    return sizeof(struct w65c02s_cpu);
+}
 
 #if !W65C02S_LINK
 static uint8_t w65c02s_openbus_read(struct w65c02s_cpu *cpu,
